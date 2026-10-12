@@ -1,0 +1,23 @@
+# ─── runtime folders created by the program ───
+# work/     temporary copies of uploaded pictures (the program keeps them 7 days)
+# outputs/  a copy of every report that was downloaded
+FEA_Report_Maker/work/
+FEA_Report_Maker/outputs/
+
+# ─── python ───
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+.pytest_cache/
+
+# ─── distribution ZIP built by package.py ───
+FEA_Report_Maker_v*.zip
+
+# ─── editors / os ───
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+~$*.pptx
