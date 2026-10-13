@@ -1,0 +1,187 @@
+FEA REPORT MAKER 3.0.1  -  STEP BY STEP FOR WINDOWS
+===================================================
+
+For a person who has never installed a program. Take your time. Every step says what you should SEE.
+The first time takes about 15 minutes. After that, making a report takes about 5 minutes.
+
+You need:  a Windows 10 or 11 PC, an internet connection (only for steps 3 to 5, and the first start),
+           and your ANSYS screenshots (PNG or JPG files).
+
+Nothing you do here can harm your computer, and your pictures never leave it.
+
+
+=============================================================================
+PART A  -  GET THE PROGRAM  (one time)
+=============================================================================
+
+STEP 1.  Find the ZIP file
+   The file is called   FEA_Report_Maker_v3.0.1.zip
+   Download it from the place where you received it (the Download button). Windows saves it in your
+   "Downloads" folder:  open File Explorer (the yellow folder icon in the taskbar) > click "Downloads"
+   on the left.
+   YOU SHOULD SEE:  a file  FEA_Report_Maker_v3.0.1  with a zipper on its icon.
+
+STEP 2.  Extract the ZIP (this is the step people forget)
+   Right-click the file > choose  "Extract All..."  > click the  "Extract"  button.
+   YOU SHOULD SEE:  a NEW normal folder (no zipper)  FEA_Report_Maker_v3.0.1  next to the ZIP. Open it:
+   you see  start_windows.bat, README.txt, app, engine ...
+   DO NOT double-click anything while you are still INSIDE the ZIP window. If you have an older version of
+   this program, do NOT extract over it: the new folder has its own name.
+
+STEP 3.  Install Python  (the engine that runs the program)
+   IMPORTANT: python.org now pushes a new tool called "Python install manager". For this program please use the
+   CLASSIC installer below instead. It is a normal installer and the simplest one.
+   a) Click this address, or copy it into the address bar of your browser and press Enter:
+            https://www.python.org/ftp/python/3.14.8/python-3.14.8-amd64.exe
+      The installer file  python-3.14.8-amd64.exe  is downloaded (to your Downloads folder).
+      It is the official file from python.org. Any Python from 3.9 up to 3.15 works; 3.14 is the one we use here.
+   b) Open the downloaded file (from the browser's download list, or from your Downloads folder).
+   c) VERY IMPORTANT: on the FIRST screen, at the bottom, tick the little box
+            [x] Add python.exe to PATH
+      Then click  "Install Now".  If Windows asks "Do you want to allow this app to make changes?" click Yes.
+   d) Wait. At the end it says  "Setup was successful"  >  click  Close.
+      (If it also offers "Disable path length limit", you can ignore that.)
+   CHECK IT:  press the Windows key, type   cmd   and press Enter. In the black window type
+              python --version     and press Enter.
+   YOU SHOULD SEE:  Python 3.14.8  (or another 3.x number). Close the black window.
+   IF NOT:  you probably forgot the tick box. Run the installer again, choose "Modify" or "Repair"... or simply
+            uninstall Python and install it again with the tick box ticked.
+   ALREADY HAVE PYTHON?  If  python --version  shows 3.9 or higher, you can skip this step.
+   ALREADY INSTALLED THE "PYTHON INSTALL MANAGER"?  Then Python itself is still missing. Press the Windows key,
+            type  cmd , press Enter, type   py install 3.14   and press Enter (answer Y if it asks).
+            Then go on with step 4.
+
+STEP 4.  Install Tesseract  (the "picture reader": it reads the numbers from your screenshots)
+   a) Go to      https://github.com/UB-Mannheim/tesseract/wiki
+   b) Find the line that starts with  "tesseract-ocr-w64-setup-"  (it ends with .exe) and click it.
+   c) Open the downloaded file. Click Yes if Windows asks. Click  Next  /  Install  with the DEFAULT choices,
+      then  Finish.  (Do not change the folder:  C:\Program Files\Tesseract-OCR .)
+   WITHOUT this step the program still works, but in "manual mode": you must type every number yourself.
+
+STEP 5.  (Optional)  LibreOffice  -  only if you want the PDF to have text you can select and search.
+   https://www.libreoffice.org/download/   Not needed for the PowerPoint, not needed for the preview.
+
+
+=============================================================================
+PART B  -  START THE PROGRAM  (every time)
+=============================================================================
+
+STEP 6.  Double-click  start_windows.bat   (in the folder  FEA_Report_Maker_v3.0.1 )
+   - Windows may show a blue window "Windows protected your PC". Click  "More info"  then  "Run anyway".
+     (The file is plain text; you may open it with Notepad to see that it only starts the program.)
+   - A BLACK window opens. LEAVE IT OPEN while you work. It is the engine of the program.
+   - The FIRST time it writes "installing the needed Python packages" and needs about 1 to 5 minutes
+     (internet needed). The window may look quiet or "stuck" - that is normal. Wait, and do not close it.
+     It happens only once per version.
+   YOU SHOULD SEE in the black window:
+        FEA Report Maker 3.0.1
+        Picture reader (Tesseract) : ready
+        Open this address in your browser:  http://127.0.0.1:5055
+   and your browser opens by itself.
+
+STEP 7.  Look at the page
+   If the browser did not open: open Chrome or Edge and type   http://127.0.0.1:5055   in the address bar.
+   YOU SHOULD SEE:  a white page "Drop your ANSYS screenshots", and at the top right a small box  v3.0.1  and
+   "Picture reader: ready".
+   IF IT SAYS another number (e.g. "v3.0") or none: an OLD copy of the program is still open. Close ALL black windows and all
+   tabs of the program, then do step 6 again.
+
+
+=============================================================================
+PART C  -  MAKE A REPORT  (every time)
+=============================================================================
+
+STEP 8.  Upload page
+   a) "1. How many load cases does this job have?"   Choose the number. Not sure? Leave "Not sure".
+      (A load case is one set of loads, for example Case 1 = pressure only, Case 2 = pressure + moment.)
+   b) "2. How do you want to add the pictures?"
+        "All together (bulk)"  =  one big box: drop all pictures of the job, in any order.
+        "Case by case"         =  one box for the general pictures (geometry, mesh) and one box per load case.
+   c) Open the folder with your screenshots in File Explorer. Select all the pictures (click one, then press
+      Ctrl+A) and DRAG them into the box. (Or click the box and choose the files.)
+      YOU SHOULD SEE:  the box "3. Your pictures" with one line per picture.
+   d) Optional, but it helps:  type a NAME for a picture and say WHAT IT IS.
+        - A zoomed picture or a cut-section picture:  choose  "Zoomed or cut-section picture"  and name it after
+          the result it belongs to, for example   equivalent stress    or    shaft max shear .
+        - A picture of ONE PART, or a shear / principal result:  choose  "Another result"  and name the part
+          (shaft).
+        - Everything else: leave "Let the app decide".
+   e) Click the blue button  "Read the pictures".  Wait about 10 seconds (a counter shows the seconds).
+      YOU SHOULD SEE:  the page "Review & preview" and the first slide of your report.
+
+STEP 9.  Review the draft
+   - Yellow boxes = things only YOU know (yield stress, where the supports are, report number, client...).
+     Fill in what you can. You can also leave them: nothing blocks you.
+   - If a card "Which load case is which?" appears at the top: for each group of pictures choose "Case 1",
+     "Case 2" ... (the program did not want to guess).
+   - "Pictures": check that each picture is what the program says. The grey line says WHY. If one is wrong,
+     change it in the list.
+   - "Material": type the YIELD STRESS (Syt). The allowable stress is calculated (Syt / FOS). If your job has
+     several parts (Blade, Shaft, Dowel pin): add a row for each part - the part's results use its own row.
+     (In the part's result box there is a link "Add ... to the material table".)
+   - Under each load case: the results, the shear / principal results, the zoomed and cut-section pictures
+     and the wording of the captions. Everything can be edited.
+   - THE PREVIEW DOES NOT CHANGE WHILE YOU TYPE. When it says "Out of date", click the  "Preview"  button
+     (bottom bar) to see your changes. This is on purpose.
+
+STEP 10.  Download
+   Click  "Download PowerPoint"  (or  "Download PDF").
+   YOU SHOULD SEE:  a green message "Download started". The file is in your Downloads folder
+   (the message has a button "Open the Downloads folder").  A copy is also kept in the folder  outputs  of
+   the program.
+   Open the PowerPoint. If it says "PROTECTED VIEW", click  "Enable Editing"  (it is your own file).
+   Spots that still need you appear in YELLOW inside [square brackets] - complete them in PowerPoint.
+   Give the file one last look before it goes to the client. The program is a drafting aid: you stay
+   responsible for the numbers and the conclusions.
+
+
+=============================================================================
+PART D  -  NEXT TIME, AND STOPPING
+=============================================================================
+
+   To STOP the program:  close the black window.
+   To work again:        double-click  start_windows.bat  again (steps 3 to 5 are never repeated).
+   Closed the browser tab by mistake?  Open  http://127.0.0.1:5055  again. The page offers
+   "Continue your last report?" - everything you typed is still there.
+   A new job:  press "Use other pictures" at the top of the review page.
+
+
+=============================================================================
+IF SOMETHING GOES WRONG
+=============================================================================
+
+   The black window opens and closes at once
+        Start it again and read the last lines; they say what is missing. Most often Python is not installed
+        or the box "Add python.exe to PATH" was not ticked (step 3).
+   "Python was not found"   (or the black window shows two lists of steps about Python)
+        Do step 3 again: the CLASSIC installer, with the tick box.
+        If you installed the "Python install manager" instead: press the Windows key, type cmd, press Enter,
+        type   py install 3.14   and press Enter (answer Y). Then double-click start_windows.bat again.
+   "Windows protected your PC"
+        Click "More info" > "Run anyway".
+   "You probably started it from INSIDE the ZIP file"
+        You skipped step 2: right-click the ZIP > Extract All... and use the new folder.
+   Packages could not be installed
+        Check the internet connection and start again. If it keeps failing: delete the hidden folder  .venv
+        inside the program folder (View > Show > Hidden items) and start again.
+   The browser shows "This site can't be reached"
+        The black window was closed. Start the program again (step 6).
+   It says "Picture reader: manual mode"
+        Tesseract is not installed (step 4), or it was installed after the program was started: close the
+        black window and start again.
+   The page shows v2.2 (or another old number)
+        An old copy is still open. Close all black windows and all browser tabs of the program, start again.
+   The download does not start
+        Look under the message for "Nothing happened? Click here". Also check the browser's download list
+        (Ctrl+J). Your copy is always in the folder  outputs  of the program.
+        If your browser asks WHERE to save every file: Chrome / Edge > Settings > Downloads > switch off
+        "Ask where to save each file before downloading".
+   A picture is sorted wrongly
+        Change "What is it?" / "Load case" in the table "Pictures" (review page).
+   A number is wrong
+        Compare with the small crop of the legend next to it and type the correct value.
+   Something else
+        Take a photo or screenshot of the black window AND of the page and send it to the person who gave
+        you the program. The black window often tells exactly what is wrong.
+
+   More details: README.txt (in the same folder).
