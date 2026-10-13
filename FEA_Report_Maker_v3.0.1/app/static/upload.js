@@ -48,18 +48,37 @@ function zoneCount(key) {
   return U.items.filter(it => (key === 'all') || (key === 'general' ? !it.case : String(it.case) === String(key))).length;
 }
 
-function dropZone(key, title, sub) {
+function dropZone(key, title, sub, onClose) {
   const file = h('input', { type: 'file', multiple: true, accept: 'image/*,.png,.jpg,.jpeg,.bmp,.tif,.tiff,.webp', hidden: true, id: key === 'all' ? 'file' : `file-${key}` });
   const cnt = h('em', { class: 'zc', 'data-zc': key }, '');
+  const closeBtn = onClose ? h('button', {
+    class: 'zone-close', type: 'button', title: `Close Load case ${key}`, 'aria-label': `Close Load case ${key}`,
+    onclick: e => { e.preventDefault(); e.stopPropagation(); onClose(); }
+  }, '\u2715') : null;
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
   svg.setAttribute('viewBox', '0 0 48 48'); svg.setAttribute('width', key === 'all' ? '50' : '34'); svg.setAttribute('height', key === 'all' ? '50' : '34'); svg.setAttribute('aria-hidden', 'true');
   svg.innerHTML = '<path d="M24 33V12m0 0l-9 9m9-9l9 9" fill="none" stroke="#2a6fa6" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/><path d="M8 33v5a3 3 0 003 3h26a3 3 0 003-3v-5" fill="none" stroke="#2a6fa6" stroke-width="3" stroke-linecap="round"/>';
-  const box = h('label', { class: 'drop zone' + (key === 'all' ? ' wide' : ''), 'data-zone': key }, svg, h('b', {}, title), h('span', {}, sub), cnt, file);
+  const box = h('label', { class: 'drop zone' + (key === 'all' ? ' wide' : ''), 'data-zone': key }, closeBtn, svg, h('b', {}, title), h('span', {}, sub), cnt, file);
   file.addEventListener('change', () => { const fl = Array.from(file.files); file.value = ''; if (fl.length) addFiles(fl, key); });
   ['dragenter', 'dragover'].forEach(ev => box.addEventListener(ev, e => { e.preventDefault(); box.classList.add('over'); }));
   ['dragleave', 'drop'].forEach(ev => box.addEventListener(ev, e => { e.preventDefault(); box.classList.remove('over'); }));
   box.addEventListener('drop', e => { const fl = Array.from(e.dataTransfer.files); if (fl.length) addFiles(fl, key); });
   return box;
+}
+
+function closeZone(k) {
+  const cur = ncasesValue() || U.zones;
+  U.items = U.items.filter(it => {
+    if (Number(it.case) === k) { URL.revokeObjectURL(it.url); return false; }
+    if (Number(it.case) > k) it.case = String(Number(it.case) - 1);
+    return true;
+  });
+  if (cur > 1) {
+    const next = cur - 1;
+    U.zones = next;
+    if (ncasesValue()) { U.ncases = String(next); $('#up-ncases').value = U.ncases; syncSetup(); }
+  }
+  renderZones(); renderList();
 }
 
 function zoneCountText() {
@@ -75,8 +94,15 @@ function renderZones() {
     const count = n || U.zones;
     host.className = 'up-zones multi';
     const zs = [dropZone('general', 'General pictures', 'Geometry (the model) and mesh')];
-    for (let k = 1; k <= count; k++) zs.push(dropZone(k, `Load case ${k}`, 'Setup (loads & supports), deformation, stress and any other result of this case'));
-    if (n === null && count < 8) zs.push(h('button', { class: 'zone-add', type: 'button', onclick: () => { U.zones += 1; renderZones(); renderList(); } }, '+ Add another load case'));
+    for (let k = 1; k <= count; k++) {
+      const canClose = count > 1 || zoneCount(k) > 0;
+      zs.push(dropZone(k, `Load case ${k}`, 'Setup (loads & supports), deformation, stress and any other result of this case', canClose ? () => closeZone(k) : null));
+    }
+    if (count < 8) zs.push(h('button', { class: 'zone-add', type: 'button', onclick: () => {
+      const next = count + 1; U.zones = next;
+      if (ncasesValue()) { U.ncases = String(next); $('#up-ncases').value = U.ncases; syncSetup(); }
+      renderZones(); renderList();
+    } }, '+ Add another load case'));
     host.replaceChildren(...zs);
   }
   zoneCountText();
@@ -134,10 +160,13 @@ function renderList() {
 }
 
 // ───── send them to the program
-function manifestOf(it) {
+function manifestOf(it, caseMap) {
   const m = {};
   const label = it.name.trim(); if (label) m.label = label;
-  if (it.case) m.case = parseInt(it.case, 10);
+  if (it.case) {
+    const raw = parseInt(it.case, 10);
+    m.case = (caseMap && caseMap.has(raw)) ? caseMap.get(raw) : raw;
+  }
   if (it.type && it.type !== 'auto') m.role = it.type;
   if (it.type === 'x_other' && it.kind) m.kind = it.kind;
   if (it.type === 'view' && it.view) m.view = it.view;
@@ -204,12 +233,18 @@ async function restoreUploadDraft(r) {
 async function readPictures() {
   const items = U.items;
   if (!items.length) { showAlert('Please add the pictures first (drag them into the box).'); return; }
+  const usedCases = [...new Set(items
+    .filter(it => !['geometry', 'mesh', 'unused'].includes(it.type) && it.case)
+    .map(it => parseInt(it.case, 10)).filter(Boolean))].sort((a, b) => a - b);
+  const caseMap = new Map(usedCases.map((c, idx) => [c, idx + 1]));
   const ac = new AbortController();
   busy(`Reading ${items.length} picture${items.length > 1 ? 's' : ''} ... a few seconds`, () => ac.abort());
   const fd = new FormData();
   items.forEach(it => fd.append('files', it.file, it.file.name));
-  fd.append('manifest', JSON.stringify(items.map(manifestOf)));
-  const nc = ncasesValue(); if (nc) fd.append('ncases', String(nc));
+  fd.append('manifest', JSON.stringify(items.map(it => manifestOf(it, caseMap))));
+  const nc = ncasesValue();
+  const effectiveNc = usedCases.length ? (nc ? Math.min(nc, usedCases.length) : (U.mode === 'cases' ? usedCases.length : null)) : nc;
+  if (effectiveNc) fd.append('ncases', String(effectiveNc));
   if (U.sid) fd.append('sid', U.sid);
   try {
     startReview(await api('/api/analyze', { method: 'POST', body: fd, signal: ac.signal }));

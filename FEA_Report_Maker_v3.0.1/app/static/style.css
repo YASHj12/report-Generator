@@ -345,8 +345,20 @@ svg.ico { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-wi
 .up-zones { display: grid; gap: 14px; margin-top: 4px; }
 .up-zones.one { grid-template-columns: 1fr; }
 .up-zones.multi { grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); }
-.drop.zone { padding: 22px 14px; gap: 5px; }
+.drop.zone { position: relative; padding: 22px 14px; gap: 5px; }
 .drop.zone.wide { padding: 44px 20px; }
+.zone-close {
+  position: absolute; top: 8px; right: 8px; width: 26px; height: 26px; border-radius: 50%;
+  border: 1px solid var(--line2); background: #fff; color: var(--grey); font-size: 13px; line-height: 1;
+  display: inline-flex; align-items: center; justify-content: center; cursor: pointer; padding: 0;
+}
+.zone-close:hover { background: var(--bad-bg); color: var(--bad); border-color: var(--bad); }
+.case-head-acts { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.case-close {
+  padding: 5px 11px; border-radius: 7px; border: 1px solid var(--line2); background: #fff;
+  color: var(--grey); font-size: 13px; font-weight: 600; cursor: pointer;
+}
+.case-close:hover { background: var(--bad-bg); color: var(--bad); border-color: var(--bad); }
 .drop.zone b { font-size: 16px; }
 .drop.zone.wide b { font-size: 20px; }
 .drop.zone span { font-size: 13px; }

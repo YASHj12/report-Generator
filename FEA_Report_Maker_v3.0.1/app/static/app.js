@@ -412,9 +412,31 @@ function resume(r) {
 }
 
 // ───────────────────────────── start the review ─────────────────────────────
+function caseHasFiles(c) {
+  return Boolean(c && !c.closed && (
+    (c.bc_id !== null && c.bc_id !== undefined) ||
+    (c.def_id !== null && c.def_id !== undefined) ||
+    (c.stress_id !== null && c.stress_id !== undefined) ||
+    (c.more && c.more.length) ||
+    (c.views && c.views.length) ||
+    (c.extras && c.extras.length)
+  ));
+}
+
+function closeCase(caseNo) {
+  for (const img of S.images) {
+    if (img.case === caseNo) { img.role = 'unused'; img.case = null; }
+    else if (img.case && img.case > caseNo) { img.case -= 1; }
+  }
+  S.cases = S.cases.filter(c => c.n !== caseNo).map(c => Object.assign({}, c, { n: c.n > caseNo ? c.n - 1 : c.n }));
+  regroup();
+  scheduleSave();
+}
+
 function newCase(dc) {
+  const diffShort = Boolean(dc.short_name && dc.name && dc.short_name !== dc.name);
   return Object.assign({}, dc, {
-    def_max: nice(dc.def_max), stress_max: nice(dc.stress_max), notes: [], texts: {}, dirty: {}, obs: [], exceeds: null, tier: null,
+    def_max: nice(dc.def_max), stress_max: nice(dc.stress_max), notes: [], texts: {}, dirty: diffShort ? { short: true } : {}, obs: [], exceeds: null, tier: null,
     needsBasis: false, bc_items: dc.bc_items.slice(), bc_legend: (dc.bc_legend || []).slice(),
     basis: '', sing_loc: '', stress_away: '', loc_stress: '', loc_def: '', react_applied: '', react_sum: '', layout: '', bc_layout: '',
     extras: (dc.extras || []).map(e => Object.assign({}, e, { caption: '' })),
@@ -441,7 +463,7 @@ function startReview(r) {
   S.layouts = { results: 'auto', geometry: 'auto', bc: 'auto', extras: 'auto' };
   S.geometry = r.geometry.map(g => ({ id: g.id, heading: g.heading, caption: '' }));
   S.meshes = r.meshes.map(g => ({ id: g.id, heading: g.heading, caption: '' }));
-  S.cases = r.cases.map(newCase);
+  S.cases = r.cases.map(newCase).filter(caseHasFiles);
   S.unordered = r.unordered || [];
   show('review');
   renderReview();
@@ -854,7 +876,14 @@ function caseCard(c, k) {
   const ev = (key, label, hint) => h('label', { class: 'f' }, h('span', {}, label, h('span', { class: 'opt' }, '  (optional)')), inp(c, key, { label: `Case ${c.n}: ${label}`, onchange: scheduleDerive }), hint ? h('small', {}, hint) : null);
 
   return h('section', { class: 'card', 'data-casecard': c.n },
-    h('div', { class: 'case-head' }, h('h2', {}, h('span', { class: 'num' }, String(7 + k)), `Load case ${c.n}`), h('span', { class: 'badge', 'data-badge': c.n, hidden: true })),
+    h('div', { class: 'case-head' },
+      h('h2', {}, h('span', { class: 'num' }, String(7 + k)), `Load case ${c.n}`),
+      h('div', { class: 'case-head-acts' },
+        h('span', { class: 'badge', 'data-badge': c.n, hidden: true }),
+        h('button', {
+          class: 'case-close', type: 'button', title: `Close Load case ${c.n}`,
+          onclick: () => closeCase(c.n)
+        }, '\u2715 Close case'))),
     h('div', { class: 'casepics' },
       h('figure', {}, thumb(c.bc_id, 'thumb big', 300), h('figcaption', {}, 'Setup')),
       h('figure', {}, thumb(c.def_id, 'thumb big', 300), h('figcaption', {}, 'Deformation')),
@@ -1121,11 +1150,15 @@ async function regroup() {
         return Object.assign({}, m, { max: nice(om ? om.max : m.max), min: nice(om ? om.min : m.min), allow: om ? om.allow : '', caption_edit: om ? om.caption_edit : '',
                                       auto_caption: om ? om.auto_caption : '', tier: om ? om.tier : null }); });
       c.views = (dc.views || []).map(v => { const ov = (o.views || []).find(x => x.id === v.id); return Object.assign({}, v, { slide_label: ov ? ov.slide_label : '' }); });
-      if (bcChanged) { c.bc_items = dc.bc_items.slice(); c.bc_legend = dc.bc_legend.slice(); c.name = dc.name; c.subtitle = dc.subtitle; c.short_name = dc.short_name; }
+      if (bcChanged) {
+        c.bc_items = dc.bc_items.slice(); c.bc_legend = dc.bc_legend.slice();
+        c.name = dc.name; c.subtitle = dc.subtitle; c.short_name = dc.short_name;
+        if (dc.short_name && dc.name && dc.short_name !== dc.name) c.dirty.short = true;
+      }
       if (o.def_id !== dc.def_id) c.def_max = nice(dc.def_max);
       if (o.stress_id !== dc.stress_id) c.stress_max = nice(dc.stress_max);
       return c;
-    });
+    }).filter(caseHasFiles);
     renderReview(); scheduleDerive();
   } catch (e) { showAlert(e.message); }
   finally { busy(false); }
@@ -1142,7 +1175,7 @@ function deriveBody() {
     def_limit: num(S.defLimit), material: { E: row.E, nu: row.nu, rho: row.rho }, mat_rows: S.mat.rows.map(r => ({ item: r.item, material: r.material, yield: num(r.yield) })),
     mesh_stats: S.meshStats, assumptions: assumptionsList(),
     layouts: S.layouts, geometry: S.geometry.map(g => ({ id: g.id })), meshes: S.meshes.map(g => ({ id: g.id })),
-    cases: S.cases.map(c => ({ n: c.n, def_max: num(c.def_max), stress_max: num(c.stress_max), red_px: c.stress_red_px, legend: c.stress_legend || [],
+    cases: S.cases.filter(caseHasFiles).map(c => ({ n: c.n, def_max: num(c.def_max), stress_max: num(c.stress_max), red_px: c.stress_red_px, legend: c.stress_legend || [],
       stress_unit: c.stress_unit, def_unit: c.def_unit, basis: c.basis, sing_loc: c.sing_loc, stress_away: c.stress_away, loc_stress: c.loc_stress,
       loc_def: c.loc_def, react_applied: c.react_applied, react_sum: c.react_sum, gravity: c.gravity, legend_px: c.legend_px, layout: c.layout,
       bc_layout: c.bc_layout, bc_id: c.bc_id, def_id: c.def_id, stress_id: c.stress_id, bc_items: c.bc_items, notes: c.notes,
@@ -1228,7 +1261,7 @@ function buildPayload() {
     geometry: S.geometry.map(g => ({ id: g.id, heading: g.heading, caption: g.caption })),
     meshes: S.meshes.map(g => ({ id: g.id, heading: g.heading, caption: g.caption })), mesh_stats: S.meshStats,
     assumptions: assumptionsList(), layouts: S.layouts,
-    cases: S.cases.map(c => ({ n: c.n, name: c.name, subtitle: c.subtitle, short_name: c.short_name, bc_id: c.bc_id, def_id: c.def_id,
+    cases: S.cases.filter(caseHasFiles).map(c => ({ n: c.n, name: c.name, subtitle: c.subtitle, short_name: c.short_name, bc_id: c.bc_id, def_id: c.def_id,
       stress_id: c.stress_id, bc_items: c.bc_items, notes: c.notes, def_max: c.def_max, stress_max: c.stress_max, basis: c.basis, sing_loc: c.sing_loc,
       stress_away: c.stress_away, loc_stress: c.loc_stress, loc_def: c.loc_def, react_applied: c.react_applied, react_sum: c.react_sum,
       layout: c.layout, bc_layout: c.bc_layout, legend_px: c.legend_px, extras: c.extras.map(e => ({ id: e.id, kind: e.kind, heading: e.heading, caption: e.caption, max: e.max })),

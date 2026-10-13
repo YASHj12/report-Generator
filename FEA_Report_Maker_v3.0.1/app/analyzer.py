@@ -45,10 +45,10 @@ MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "June", "July", "Aug", "Sept", "Oct
 LOAD_WORDS = {"pressure", "moment", "force", "gravity", "load", "self", "weight", "temperature", "torque"}
 
 MESH_EDGE_THRESHOLD = 0.075       # fraction of edge pixels. Measured on 2 jobs: plain geometry 0.004-0.021, mesh 0.227-0.411
-HEADER_BOX = (0.0, 0.0, 0.46, 0.215)      # where ANSYS prints the title block (fractions of the picture)
+HEADER_BOX = (0.0, 0.0, 0.68, 0.215)      # where ANSYS prints the title block (fractions of the picture)
 LEGEND_BOX = (0.0, 0.12, 0.27, 0.62)      # colour legend of a result plot (the red "Max" callout on the model is outside)
 BC_BOX = (0.028, 0.07, 0.36, 0.46)        # load / support legend of the setup picture
-HEADER_PX, LEGEND_PX, BC_PX = (0, 0, 520, 170), (0, 66, 270, 340), (15, 38, 355, 253)   # same regions in pixels of a ~1000 x 550 screenshot
+HEADER_PX, LEGEND_PX, BC_PX = (0, 0, 780, 170), (0, 66, 270, 340), (15, 38, 355, 253)   # same regions in pixels of a ~1000 x 550 screenshot
 ANALYSIS_MAX_SIDE = 3000                  # bigger screenshots are scaled down for analysis only (memory)
 CASE_ROLES = {"bc", "deformation", "stress", "x_bc", "x_deformation", "x_stress", "x_other", "view"}
 MAIN_SLOTS = (("bc", "bc_id"), ("deformation", "def_id"), ("stress", "stress_id"))
@@ -243,7 +243,7 @@ def parse_header(lines):
     out = {"letter": None, "model": None, "role": None, "unit": None, "has_header": False, "is_result": False,
            "result_kind": "", "kind": "", "kind_label": "", "scope": ""}
     for l in lines[:3]:
-        m = re.match(r"^\W*([A-Z])\s*[:;]\s*(\S.*)$", l)
+        m = re.match(r"^\W*([A-Z])\s*[:;.\-]\s*(\S.*)$", l)
         if m:
             out["letter"], out["model"] = m.group(1), re.sub(r"(\s+[a-z]{1,2})+$", "", m.group(2).strip())
             out["has_header"] = True
@@ -262,6 +262,11 @@ def parse_header(lines):
     src = f"{type_txt} | {name_line}".lower()
     other = re.search(r"deformation|stress|strain|safety factor|displacement|reaction|energy|fatigue|damage|shear|principal|intensity", src)
     static = re.search(r"static structural|transient structural|steady-state|modal|harmonic|buckling", " ".join(lines[:3]).lower())
+    if not out["model"] and lines and (static or out["is_result"]):
+        l0 = re.sub(r"^\W*([A-Z]\s*[:;.\-]\s*)?", "", lines[0]).strip()
+        if l0 and not re.search(r"^(static structural|transient structural|steady-state|modal|harmonic|buckling|type\b|unit\b|time\b)", l0, re.I):
+            out["model"] = re.sub(r"(\s+[a-z]{1,2})+$", "", l0)
+            out["has_header"] = True
     if out["is_result"] or (other and not static):
         kid, klabel = classify_kind(type_txt) if type_txt else ("", "")
         if not kid:
@@ -445,8 +450,45 @@ def bc_sentence(legend: str):
     return f"[{legend} - please describe]", True
 
 
-def case_headline(legend_lines):
-    """('Pressure Only', '(Self Weight + Pressure)') built from the LOADS found in the BC legend."""
+def parse_workbench_model(model: str) -> dict:
+    """Parse the ANSYS Workbench file/system name from the first bold line of the screenshot
+    (e.g. '6203_KCP_MLD_Blade_PRESSURE', '6203_KCP_MLD_Blade_PRESSURE+Moment', 'Damper_Blade_Wind_Load', 'Duct_Structure')."""
+    raw = re.sub(r"^\W*([A-Z]\s*[:;.\-]\s*)?", "", (model or "").strip())
+    raw = re.sub(r"(\s+[a-z]{1,2})+$", "", raw).strip()
+    loads = []
+    self_weight = False
+    for part in re.split(r"[_\s+\-/]+", raw):
+        tl = part.lower()
+        if tl in ("gravity", "self", "weight"):
+            self_weight = True
+        elif tl == "pressure" and "Pressure" not in loads:
+            loads.append("Pressure")
+        elif tl in ("moment", "torque") and "Moment" not in loads:
+            loads.append("Moment")
+        elif tl == "force" and "Force" not in loads:
+            loads.append("Force")
+        elif tl in ("temperature", "thermal") and "Temperature" not in loads:
+            loads.append("Temperature")
+        elif tl == "wind" and "Wind Load" not in loads:
+            loads.append("Wind Load")
+        elif tl == "seismic" and "Seismic Load" not in loads:
+            loads.append("Seismic Load")
+    skip = LOAD_WORDS | {"thermal", "wind", "seismic", "static", "structural", "transient", "modal", "analysis", "fea"}
+    toks = [t for t in re.split(r"[_\s]+", raw)
+            if t and "+" not in t and t.lower() not in skip and not re.match(r"^(?:case|lc)\d*$", t, re.I)]
+    job = client = obj = ""
+    if len(toks) >= 3 and toks[0].isdigit():
+        job, client, obj = toks[0], toks[1], " ".join(toks[2:])
+    elif len(toks) == 2 and toks[0].isdigit():
+        job, obj = toks[0], toks[1]
+    elif toks:
+        obj = " ".join(toks)
+    return {"raw": raw, "job": job, "client": client, "obj": obj, "loads": loads, "self_weight": self_weight}
+
+
+def case_headline(legend_lines, model=None):
+    """Headline and subtitle for the setup slide built from the setup screenshot's first bold line (ANSYS Workbench model name)
+    and the LOADS found in the BC legend."""
     loads, self_weight = [], False
     for l in legend_lines:
         t = l.lower()
@@ -460,11 +502,22 @@ def case_headline(legend_lines):
             loads.append("Force")
         elif "temperature" in t:
             loads.append("Temperature")
+    pm = parse_workbench_model(model) if model else {"obj": "", "loads": [], "self_weight": False}
+    for ld in pm["loads"]:
+        if ld not in loads:
+            loads.append(ld)
+    self_weight = self_weight or pm["self_weight"]
     loads = list(dict.fromkeys(loads))
-    if not loads:
-        return "", ""
-    name = f"{loads[0]} Only" if len(loads) == 1 else " + ".join(loads)
-    return name, "(" + " + ".join((["Self Weight"] if self_weight else []) + loads) + ")"
+    load_name = (f"{loads[0]} Only" if len(loads) == 1 else " + ".join(loads)) if loads else ""
+    sub = ("(" + " + ".join((["Self Weight"] if self_weight else []) + loads) + ")") if loads else ""
+    obj = pm["obj"]
+    if obj and load_name:
+        name = f"{obj} \u2013 {load_name}"
+    elif obj:
+        name = obj
+    else:
+        name = load_name
+    return name, sub
 
 
 
@@ -511,6 +564,16 @@ def extract_role_data(img: Image.Image, info: dict, role: str, k_an: float = 1.0
         if base == "stress":
             info["red_px"] = red_pixels(img)
     elif base == "bc":
+        if not info.get("model"):
+            for hbox in candidate_boxes(img, HEADER_BOX, HEADER_PX):
+                hdr_lines = _lines(ocr_region(img, *hbox))
+                h = parse_header(hdr_lines)
+                if h.get("model") or h.get("has_header"):
+                    info["model"] = h.get("model") or info.get("model")
+                    info["letter"] = h.get("letter") or info.get("letter")
+                    if not info.get("header"):
+                        info["header"] = hdr_lines[:5]
+                    break
         legend, bc_box = [], BC_BOX
         for box in candidate_boxes(img, BC_BOX, BC_PX):               # big pictures: keep the region that reads the MOST lines
             lines = parse_bc_legend(ocr_region(img, *box, psm=6))
@@ -518,7 +581,7 @@ def extract_role_data(img: Image.Image, info: dict, role: str, k_an: float = 1.0
                 legend, bc_box = lines, box
         drafts = [bc_sentence(l) for l in legend]
         info.update(bc_legend=legend, bc_draft=[dict(legend=l, text=t, needs_input=n) for l, (t, n) in zip(legend, drafts)],
-                    headline=list(case_headline(legend)), gravity=gravity_of(legend))
+                    headline=list(case_headline(legend, info.get("model"))), gravity=gravity_of(legend))
         px, crop = measure_legend(img, bc_box, "bc")
         if px:
             info["legend_px"] = round(px / k_an, 2)
@@ -890,6 +953,11 @@ def assign_cases(infos):
     become additional views.  Results of a part ('Equivalent Stress Shaft') and the other result types (shear, principal ...) are
     separate RESULTS ('more'); colour pictures without legend (zoomed, section) are VIEWS that belong to one of the plots."""
     by_id = {i["id"]: i for i in infos}
+    raw_cases = sorted({int(i["case"]) for i in infos if i["role"] in CASE_ROLES and i.get("case")})
+    case_map = {old_n: new_n for new_n, old_n in enumerate(raw_cases, 1)}
+    for i in infos:
+        if i["role"] in CASE_ROLES and i.get("case") in case_map:
+            i["case"] = case_map[int(i["case"])]
     groups = {}
     for i in infos:
         if i["role"] in CASE_ROLES and i.get("case"):
@@ -943,28 +1011,36 @@ def assign_cases(infos):
             p["parent_id"], p["parent_conf"] = pid, conf
             c["views"].append({"id": p["id"], "view_kind": p.get("view_kind") or "", "label": p.get("label") or "", "parent_id": pid,
                                "parent_conf": conf, "parent_kind": p.get("parent_kind") or "", "has_tag": bool(p.get("max_tag"))})
-        name, sub = (bc["headline"] if bc else ("", ""))
+        bc_model = (bc or {}).get("model") or (d or s or {}).get("model")
+        if bc:
+            name, sub = case_headline(bc.get("bc_legend") or [], bc_model)
+            short_only, _ = case_headline(bc.get("bc_legend") or [])
+            short_name = short_only or name
+        elif bc_model:
+            name, sub = case_headline([], bc_model)
+            short_name = name
+        else:
+            name, sub, short_name = "", "", ""
         pxs = [x["legend_px"] for x in (bc, d, s) if x and x.get("legend_px")]
         c.update(
-            name=name or f"Load Case {n}", subtitle=sub or "(Self Weight + Pressure)", short_name=name or f"Load Case {n}",
+            name=name or f"Load Case {n}", subtitle=sub or "(Self Weight + Pressure)", short_name=short_name or name or f"Load Case {n}",
             bc_items=[x["text"] for x in bc["bc_draft"]] if bc else [], bc_legend=[x["legend"] for x in bc["bc_draft"]] if bc else [],
             notes=[], def_unit=(d or {}).get("unit") or "mm", stress_unit=(s or {}).get("unit") or "MPa",
             def_max=d["max"] if d else None, stress_max=s["max"] if s else None,
             stress_red_px=s["red_px"] if s else None, stress_legend=s["legend_values"] if s else [],
             gravity=(bc or {}).get("gravity"), legend_px=(statistics.median(pxs) if pxs else None),
-            letter=(bc or d or s or {}).get("letter"), model=(bc or d or s or {}).get("model"))
+            letter=(bc or d or s or {}).get("letter"), model=bc_model)
         out.append(c)
     return out
 
 
 def guess_cover(infos, settings=None):
     settings = settings or {}
-    names = [i["model"] for i in infos if i.get("model")]
+    bc_names = [i["model"] for i in infos if i.get("role") in ("bc", "x_bc") and i.get("model")]
+    names = bc_names or [i["model"] for i in infos if i.get("model")]
     model = max(names, key=lambda s: (s.count("_"), len(s))) if names else ""
-    toks = [t for t in re.split(r"[_\s]+", model) if t and "+" not in t and t.lower() not in LOAD_WORDS]
-    job = client = obj = ""
-    if len(toks) >= 3 and toks[0].isdigit():
-        job, client, obj = toks[0], toks[1], " ".join(toks[2:])
+    pm = parse_workbench_model(model)
+    job, client, obj = pm["job"], pm["client"], pm["obj"]
     today = _dt.date.today()
     d = today.day
     suffix = "th" if 10 <= d % 100 <= 20 else {1: "st", 2: "nd", 3: "rd"}.get(d % 10, "th")

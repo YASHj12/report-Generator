@@ -1096,9 +1096,29 @@ def mesh_checks(ms):
     return out
 
 
+def _active_cases(p: dict) -> list:
+    out = []
+    for c in (p.get("cases") or []):
+        if not isinstance(c, dict) or c.get("closed"):
+            continue
+        has_files = (
+            c.get("bc_id") is not None
+            or c.get("def_id") is not None
+            or c.get("stress_id") is not None
+            or bool(c.get("more"))
+            or bool(c.get("views"))
+            or bool(c.get("extras"))
+        )
+        if has_files:
+            out.append(c)
+    return out
+
+
 def derive(p: dict) -> dict:
+    p = dict(p or {})
+    cases = _active_cases(p)
+    p["cases"] = cases
     ctx = make_ctx(p)
-    cases = p.get("cases", [])
     out, checks, caps = {}, [], []
     comps = []
     with BUILD_LOCK:
@@ -1163,6 +1183,8 @@ def build_cfg(p: dict, infos: list, out_path: Path) -> dict:
     """Everything the report engine needs.  NOTHING here raises because something is missing: a picture that does not
     exist is left out (or replaced by an empty frame - the 'missing' option), a missing number leaves out its sentence,
     a missing yield stress gives neutral wording and a bracketed placeholder.  The engine lists what it did in cfg['_notes']."""
+    p = dict(p or {})
+    p["cases"] = _active_cases(p)
     by_id = {i["id"]: i for i in infos}
 
     def pic(pid):
