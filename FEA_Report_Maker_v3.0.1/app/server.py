@@ -233,7 +233,8 @@ def cleanup_old_sessions(days=7):
     for d in WORK.iterdir():
         try:
             if d.is_dir() and now - d.stat().st_mtime > days * 86400:
-                shutil.rmtree(d, ignore_errors=True)
+                if not (d / "ui_state.json").exists() and not (d / "upload_state.json").exists():
+                    shutil.rmtree(d, ignore_errors=True)
         except OSError:
             pass
 
@@ -299,7 +300,13 @@ def api_status():
 
 
 # ───────────────────────────────────────────── step 1: read the pictures ─────────────────────────────────────────────
-def _new_session():
+def _new_session(existing_sid=None):
+    if existing_sid and isinstance(existing_sid, str) and SID_RE.match(existing_sid) and (WORK / existing_sid).is_dir():
+        sid = existing_sid
+        img_dir = WORK / sid / "images"
+        shutil.rmtree(img_dir, ignore_errors=True)
+        img_dir.mkdir(parents=True, exist_ok=True)
+        return sid, img_dir
     sid = uuid.uuid4().hex[:12]
     (WORK / sid / "images").mkdir(parents=True)
     return sid, WORK / sid / "images"
@@ -310,7 +317,7 @@ def api_analyze():
     files = [f for f in request.files.getlist("files") if f and f.filename]
     if not files:
         raise UserError("No pictures received.")
-    sid, folder = _new_session()
+    sid, folder = _new_session(request.form.get("sid"))
     try:                                                                  # the upload page sends one entry per file (same order)
         manifest = json.loads(request.form.get("manifest") or "[]")
     except ValueError:
@@ -342,6 +349,7 @@ def api_analyze():
         raise UserError("None of the files could be opened as pictures (use PNG or JPG).")
     res, took = run_analysis(paths, names, hints, expected)
     save_infos(sid, res["images"])
+    (WORK / sid / "upload_state.json").unlink(missing_ok=True)
     out = payload(sid, res["images"], res, res["cover"])
     out["took"] = took
     out["skipped"] = skipped
@@ -1597,14 +1605,291 @@ def api_generate():
                    key=meta["key"], notes=meta["notes"])
 
 
-# ───────────────────────────────────────────── auto-save / resume ─────────────────────────────────────────────
+# ───────────────────────────────────────────── auto-save / resume / recent files ─────────────────────────────────────────────
+def _fmt_dt(ts: float) -> str:
+    try:
+        return datetime.fromtimestamp(float(ts)).strftime("%d %b %Y, %I:%M:%S %p")
+    except Exception:                                                     # noqa: BLE001
+        return ""
+
+
+def _estimate_needs(st: dict, infos: list) -> int:
+    """Fallback calculation of how many required inputs are still missing in a review state."""
+    if not isinstance(st, dict):
+        return 1
+    need = 0
+    cov = st.get("cover") or {}
+    for k in ("title", "report_no", "date", "client"):
+        if not str(cov.get(k) or "").strip():
+            need += 1
+    if not str(st.get("short") or "").strip():
+        need += 1
+    mat_rows = ((st.get("mat") or {}).get("rows")) or []
+    if not mat_rows:
+        need += 1
+    else:
+        for r in mat_rows:
+            if to_float(r.get("yield")) is None:
+                need += 1
+    cases = st.get("cases") or []
+    if not cases:
+        need += 1
+    for c in cases:
+        if to_float(c.get("def_max")) is None:
+            need += 1
+        if to_float(c.get("stress_max")) is None:
+            need += 1
+        for b in (c.get("bc_items") or []):
+            if not str(b or "").strip() or "[" in str(b):
+                need += 1
+        for v in (c.get("views") or []):
+            if v.get("parent_id") is None or v.get("parent_id") == "":
+                need += 1
+    for im in (infos or []):
+        if im.get("role") == "unknown":
+            need += 1
+    return need
+
+
+def _recent_entry_for_dir(d: Path):
+    """Build a summary dict for one session directory in WORK, or None if not a saved session."""
+    if not d.is_dir() or not SID_RE.match(d.name):
+        return None
+    ui_f = d / "ui_state.json"
+    up_f = d / "upload_state.json"
+    if ui_f.exists() and (d / "session.json").exists():
+        try:
+            data = json.loads(ui_f.read_text(encoding="utf-8"))
+            infos = json.loads((d / "session.json").read_text(encoding="utf-8"))
+            st = data.get("state") or {}
+            cov = st.get("cover") or {}
+            rep_no = str(cov.get("report_no") or "").strip()
+            cov_title = str(cov.get("title") or "").strip()
+            client = str(cov.get("client") or "").strip()
+            custom_name = str(data.get("custom_name") or "").strip()
+            title = custom_name or rep_no or cov_title or "Unnamed Report"
+            subtitle = cov_title if (title != cov_title and cov_title) else client
+            saved_at = float(data.get("saved_at") or ui_f.stat().st_mtime)
+            saved_dt = data.get("saved_dt") or _fmt_dt(saved_at)
+            needs = data.get("needs_count")
+            if needs is None or not isinstance(needs, int):
+                needs = _estimate_needs(st, infos)
+            cases = st.get("cases") or []
+            is_full = (needs == 0)
+            thumb_url = f"/api/img/{d.name}/{infos[0]['id']}?w=160" if infos else None
+            return {
+                "sid": d.name,
+                "stage": "review",
+                "title": title,
+                "subtitle": subtitle,
+                "pictures": len(infos),
+                "cases_count": len(cases),
+                "saved_at": saved_at,
+                "saved_dt": saved_dt,
+                "needs_count": needs,
+                "status": "full" if is_full else "partial",
+                "status_label": "Fully Saved" if is_full else "Partially Saved",
+                "manual_save": bool(data.get("manual_save")),
+                "thumb_url": thumb_url,
+            }
+        except Exception:                                                 # noqa: BLE001
+            return None
+    if up_f.exists():
+        try:
+            data = json.loads(up_f.read_text(encoding="utf-8"))
+            items = data.get("items") or []
+            saved_at = float(data.get("saved_at") or up_f.stat().st_mtime)
+            saved_dt = data.get("saved_dt") or _fmt_dt(saved_at)
+            title = str(data.get("title") or "").strip() or f"Upload Draft ({len(items)} picture{'s' if len(items) != 1 else ''})"
+            nc = data.get("ncases")
+            cases_count = int(nc) if str(nc or "").isdigit() else 0
+            return {
+                "sid": d.name,
+                "stage": "upload",
+                "title": title,
+                "subtitle": "Step 1: Pictures uploaded (not analyzed yet)",
+                "pictures": len(items),
+                "cases_count": cases_count,
+                "saved_at": saved_at,
+                "saved_dt": saved_dt,
+                "needs_count": max(1, len(items)),
+                "status": "partial",
+                "status_label": "Partially Saved",
+                "manual_save": True,
+                "thumb_url": f"/api/upload_img/{d.name}/0" if items else None,
+            }
+        except Exception:                                                 # noqa: BLE001
+            return None
+    return None
+
+
 @app.post("/api/state")
 def api_state_save():
     """The page saves everything the engineer typed - so a refresh or a closed tab does not lose the work."""
     p = request.get_json(force=True)
     d = sess_dir(p.get("sid"))
-    (d / "ui_state.json").write_text(json.dumps({"saved_at": time.time(), "state": p.get("state")}), encoding="utf-8")
-    return jsonify(ok=True)
+    now = time.time()
+    dt_str = _fmt_dt(now)
+    prev = {}
+    ui_f = d / "ui_state.json"
+    if ui_f.exists():
+        try:
+            prev = json.loads(ui_f.read_text(encoding="utf-8"))
+        except Exception:                                                 # noqa: BLE001
+            prev = {}
+    st = p.get("state") if p.get("state") is not None else prev.get("state")
+    needs_count = p.get("needs_count")
+    if needs_count is None:
+        try:
+            infos = load_infos(d.name)
+        except Exception:                                                 # noqa: BLE001
+            infos = []
+        needs_count = _estimate_needs(st or {}, infos)
+    custom_name = p.get("custom_name") if "custom_name" in p else prev.get("custom_name", "")
+    manual_save = bool(p.get("manual_save") or prev.get("manual_save"))
+    record = {
+        "saved_at": now,
+        "saved_dt": dt_str,
+        "needs_count": int(needs_count),
+        "manual_save": manual_save,
+        "custom_name": custom_name,
+        "state": st,
+    }
+    ui_f.write_text(json.dumps(record), encoding="utf-8")
+    entry = _recent_entry_for_dir(d)
+    return jsonify(ok=True, saved_at=now, saved_dt=dt_str, entry=entry)
+
+
+@app.post("/api/save_upload")
+def api_save_upload():
+    """Save a partial draft on Step 1 (Upload page) when the user added pictures and clicked Save before reading them."""
+    files = [f for f in request.files.getlist("files") if f and f.filename]
+    if not files:
+        raise UserError("Please add at least one picture before saving.")
+    req_sid = request.form.get("sid")
+    if req_sid and isinstance(req_sid, str) and SID_RE.match(req_sid) and (WORK / req_sid).is_dir():
+        sid = req_sid
+    else:
+        sid = uuid.uuid4().hex[:12]
+    d = WORK / sid
+    up_dir = d / "upload_files"
+    shutil.rmtree(up_dir, ignore_errors=True)
+    up_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        items_meta = json.loads(request.form.get("items") or "[]")
+    except ValueError:
+        items_meta = []
+    saved_items = []
+    for k, f in enumerate(files):
+        ext = Path(f.filename).suffix.lower()
+        if ext not in IMAGE_EXTS:
+            continue
+        safe = f"{len(saved_items):02d}_{secure_filename(f.filename) or 'picture' + ext}"
+        dest = up_dir / safe
+        f.save(dest)
+        m = items_meta[k] if k < len(items_meta) and isinstance(items_meta[k], dict) else {}
+        saved_items.append({
+            "idx": len(saved_items),
+            "filename": Path(f.filename).name,
+            "stored": safe,
+            "size": dest.stat().st_size,
+            "name": str(m.get("name") or ""),
+            "type": str(m.get("type") or "auto"),
+            "kind": str(m.get("kind") or ""),
+            "view": str(m.get("view") or ""),
+            "case": m.get("case") if m.get("case") is not None else "",
+        })
+    if not saved_items:
+        raise UserError("None of the files could be saved as pictures (use PNG or JPG).")
+    now = time.time()
+    dt_str = _fmt_dt(now)
+    title = str(request.form.get("title") or "").strip()
+    record = {
+        "saved_at": now,
+        "saved_dt": dt_str,
+        "title": title,
+        "mode": str(request.form.get("mode") or "bulk"),
+        "ncases": str(request.form.get("ncases") or ""),
+        "zones": int(to_float(request.form.get("zones")) or 2),
+        "items": saved_items,
+    }
+    (d / "upload_state.json").write_text(json.dumps(record), encoding="utf-8")
+    entry = _recent_entry_for_dir(d)
+    return jsonify(ok=True, sid=sid, saved_at=now, saved_dt=dt_str, entry=entry)
+
+
+@app.get("/api/upload_img/<sid>/<int:idx>")
+def api_upload_img(sid, idx):
+    d = sess_dir(sid)
+    up_f = d / "upload_state.json"
+    if not up_f.exists():
+        abort(404)
+    data = json.loads(up_f.read_text(encoding="utf-8"))
+    items = data.get("items") or []
+    item = next((x for x in items if x.get("idx") == idx), None)
+    if not item:
+        abort(404)
+    p = d / "upload_files" / item["stored"]
+    if not p.exists():
+        abort(404)
+    return send_file(p, max_age=3600)
+
+
+@app.get("/api/recent")
+def api_recent():
+    """Return all saved files (both partially and fully saved) sorted newest first, with date and time."""
+    WORK.mkdir(parents=True, exist_ok=True)
+    items = []
+    for d in WORK.iterdir():
+        entry = _recent_entry_for_dir(d)
+        if entry is not None:
+            items.append(entry)
+    items.sort(key=lambda x: x["saved_at"], reverse=True)
+    return jsonify(items=items)
+
+
+@app.get("/api/session/<sid>")
+def api_session_get(sid):
+    """Load a specific saved file from Recent Files (either a Step 2 review session or a Step 1 upload draft)."""
+    d = sess_dir(sid)
+    ui_f = d / "ui_state.json"
+    up_f = d / "upload_state.json"
+    if ui_f.exists() and (d / "session.json").exists():
+        try:
+            data = json.loads(ui_f.read_text(encoding="utf-8"))
+            infos = load_infos(sid)
+            st = data.get("state") or {}
+            entry = _recent_entry_for_dir(d)
+            return jsonify(
+                found=True,
+                stage="review",
+                sid=sid,
+                saved_at=data.get("saved_at"),
+                saved_dt=data.get("saved_dt") or _fmt_dt(data.get("saved_at") or ui_f.stat().st_mtime),
+                pictures=len(infos),
+                title=(entry or {}).get("title") or "",
+                images=[public(sid, i) for i in infos],
+                state=st,
+                entry=entry,
+            )
+        except Exception as e:                                            # noqa: BLE001
+            raise UserError(f"Could not open the saved file ({e}).")
+    if up_f.exists():
+        try:
+            data = json.loads(up_f.read_text(encoding="utf-8"))
+            entry = _recent_entry_for_dir(d)
+            return jsonify(
+                found=True,
+                stage="upload",
+                sid=sid,
+                saved_at=data.get("saved_at"),
+                saved_dt=data.get("saved_dt") or _fmt_dt(data.get("saved_at") or up_f.stat().st_mtime),
+                upload=data,
+                entry=entry,
+            )
+        except Exception as e:                                            # noqa: BLE001
+            raise UserError(f"Could not open the saved upload draft ({e}).")
+    return jsonify(found=False), 404
 
 
 @app.get("/api/last")
@@ -1621,7 +1906,12 @@ def api_last():
         data = json.loads((best[0] / "ui_state.json").read_text(encoding="utf-8"))
         infos = load_infos(best[0].name)
         st = data["state"] or {}
-        return jsonify(found=True, sid=best[0].name, saved_at=data["saved_at"], pictures=len(infos),
+        entry = _recent_entry_for_dir(best[0])
+        return jsonify(found=True, sid=best[0].name, saved_at=data["saved_at"],
+                       saved_dt=data.get("saved_dt") or _fmt_dt(data["saved_at"]),
+                       pictures=len(infos),
+                       status=(entry or {}).get("status", "partial"),
+                       status_label=(entry or {}).get("status_label", "Partially Saved"),
                        title=(st.get("cover") or {}).get("report_no") or (st.get("cover") or {}).get("title") or "",
                        images=[public(best[0].name, i) for i in infos], state=st)
     except Exception:                                                     # noqa: BLE001
@@ -1631,8 +1921,9 @@ def api_last():
 @app.post("/api/discard")
 def api_discard():
     p = request.get_json(force=True)
-    f = sess_dir(p.get("sid")) / "ui_state.json"
-    f.unlink(missing_ok=True)
+    d = sess_dir(p.get("sid"))
+    (d / "ui_state.json").unlink(missing_ok=True)
+    (d / "upload_state.json").unlink(missing_ok=True)
     return jsonify(ok=True)
 
 

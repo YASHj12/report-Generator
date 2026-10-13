@@ -118,6 +118,7 @@ const hideAlert = () => { $('#alert').hidden = true; };
 const ICONS = {
   refresh: '<path d="M20 12a8 8 0 1 1-2.5-5.8M20 4v5.2h-5.2"/>', expand: '<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>',
   download: '<path d="M12 4v11m0 0l-4.5-4.5M12 15l4.5-4.5M5 20h14"/>', eye: '<path d="M2 12s3.7-7 10-7 10 7 10 7-3.7 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
+  save: '<path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/>',
 };
 function ico(name) {          // small line icon (inline SVG: no font or image files needed)
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -179,6 +180,16 @@ function bindUpload() {
   $('#btn-preview').addEventListener('click', () => { const c = $('#pv-card'); if (c) c.scrollIntoView({ block: 'start' }); previewNow().catch(() => {}); });
   $('#btn-pdf').addEventListener('click', () => downloadReport('pdf'));
   $('#btn-pptx').addEventListener('click', () => downloadReport('pptx'));
+  if ($('#btn-save')) $('#btn-save').addEventListener('click', () => saveCurrentWork(true));
+  if ($('#btn-top-save')) $('#btn-top-save').addEventListener('click', () => saveCurrentWork(true));
+  if ($('#btn-aside-save')) $('#btn-aside-save').addEventListener('click', () => saveCurrentWork(true));
+  if ($('#btn-new-report')) $('#btn-new-report').addEventListener('click', startNewReport);
+  document.addEventListener('keydown', e => {
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+      e.preventDefault();
+      saveCurrentWork(true);
+    }
+  });
   bindSlideBox();
 }
 
@@ -190,25 +201,202 @@ async function loadExample() {
   finally { busy(false); }
 }
 
-// ───────────────────────────── auto-save + resume ─────────────────────────────
+// ───────────────────────────── auto-save + manual save + recent files ─────────────────────────────
 function snapshot() { const o = { ver: 3 }; for (const k of STATE_KEYS) o[k] = S[k]; return JSON.parse(JSON.stringify(o)); }
 let saveTimer = null;
+
+async function saveStateNow(manual = false) {
+  if (!S.sid) return null;
+  clearTimeout(saveTimer);
+  const needsCount = $$('#s-review .need').length;
+  const r = await post('/api/state', { sid: S.sid, state: snapshot(), needs_count: needsCount, manual_save: manual });
+  updateSaveIndicator(r.entry || { saved_dt: r.saved_dt, status: needsCount === 0 ? 'full' : 'partial', status_label: needsCount === 0 ? 'Fully Saved' : 'Partially Saved' });
+  await loadRecentFiles();
+  return r;
+}
+
+function updateSaveIndicator(entry) {
+  const box = $('#recent-save-state');
+  if (!box || !entry) return;
+  box.hidden = false;
+  const isFull = entry.status === 'full';
+  box.className = 'recent-save-state ' + (isFull ? 'full' : 'partial');
+  box.replaceChildren(
+    h('span', { class: 'rss-dot' }),
+    h('span', {}, h('b', {}, isFull ? 'Fully Saved' : 'Partially Saved'), entry.saved_dt ? ` \u00b7 ${entry.saved_dt}` : '')
+  );
+}
+
+function showSaveConfirmation(entry) {
+  if (!entry) return;
+  updateSaveIndicator(entry);
+  const isFull = entry.status === 'full';
+  const statusTxt = isFull ? 'Fully Completed & Saved' : (entry.stage === 'upload' ? 'Partially Saved (Upload Stage)' : `Partially Saved (${entry.needs_count || 0} item${entry.needs_count === 1 ? '' : 's'} remaining)`);
+  toast(h('div', {},
+    h('b', {}, `\u2713 File Saved: ${entry.title || 'Report'}`),
+    h('br'),
+    `Status: ${statusTxt}`,
+    h('small', {}, `Saved on ${entry.saved_dt || 'just now'} \u2014 available in Recent Files on the right.`)
+  ), 'ok', 6000);
+}
+
+async function saveCurrentWork(manual = true) {
+  if (!$('#s-review').hidden && S.sid) {
+    try {
+      const r = await saveStateNow(manual);
+      if (manual && r) showSaveConfirmation(r.entry);
+    } catch (e) {
+      if (manual) showAlert(e.message);
+    }
+    return;
+  }
+  if (!$('#s-upload').hidden && typeof U !== 'undefined' && U.items && U.items.length > 0) {
+    await saveUploadDraft();
+    return;
+  }
+  if (S.sid) {
+    try {
+      const r = await saveStateNow(manual);
+      if (manual && r) showSaveConfirmation(r.entry);
+    } catch (e) {
+      if (manual) showAlert(e.message);
+    }
+    return;
+  }
+  showAlert('Please add pictures first before saving a file.', 'warn');
+}
+
+async function startNewReport() {
+  if (!$('#s-review').hidden && S.sid) {
+    await saveStateNow(false).catch(() => {});
+  }
+  S.sid = null;
+  if (typeof U !== 'undefined') {
+    U.items.forEach(it => URL.revokeObjectURL(it.url));
+    U.items = [];
+    U.sid = null;
+    renderZones();
+    renderList();
+  }
+  show('upload');
+  loadRecentFiles();
+}
+
 function scheduleSave() {
   if (!S.sid || $('#s-review').hidden) return;
   markOutdated();                                          // the preview is NOT rebuilt: it only says "out of date"
   clearTimeout(saveTimer);
-  saveTimer = setTimeout(() => { post('/api/state', { sid: S.sid, state: snapshot() }).catch(() => {}); }, 800);
+  saveTimer = setTimeout(() => { saveStateNow(false).catch(() => {}); }, 800);
 }
+
 const ago = t => { const m = Math.max(0, Math.round((Date.now() / 1000 - t) / 60)); return m < 1 ? 'just now' : m < 60 ? `${m} min ago` : m < 1440 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} days ago`; };
+
+async function loadRecentFiles() {
+  try {
+    const r = await api('/api/recent');
+    renderRecentFiles(r.items || []);
+  } catch (e) { /* ignore background error */ }
+}
+
+function renderRecentFiles(items) {
+  const list = $('#recent-list'), cnt = $('#recent-count');
+  if (!list) return;
+  if (cnt) cnt.textContent = String(items.length);
+  if (!items.length) {
+    list.replaceChildren(h('div', { class: 'rf-empty' },
+      h('b', {}, 'No saved files yet'),
+      h('p', {}, 'Press the "Save" button at any time (even if partially filled) and your file will appear here with its date and time.')));
+    return;
+  }
+  const activeSid = !$('#s-review').hidden ? S.sid : (typeof U !== 'undefined' ? U.sid : null);
+  list.replaceChildren(...items.map(it => {
+    const isFull = it.status === 'full';
+    const isActive = activeSid === it.sid;
+    const statusBadge = h('span', { class: 'rf-status ' + (isFull ? 'full' : 'partial') },
+      isFull ? '\u2713 Fully Saved' : '\u25d0 Partially Saved');
+    const detailText = isFull
+      ? 'All fields complete'
+      : (it.stage === 'upload' ? 'Upload draft (pictures added)' : `${it.needs_count} field${it.needs_count === 1 ? '' : 's'} left to fill`);
+    const thumbEl = it.thumb_url
+      ? h('img', { class: 'rf-thumb', src: it.thumb_url, alt: '' })
+      : h('div', { class: 'rf-thumb empty' }, 'FEA');
+
+    return h('div', { class: 'rf-item' + (isActive ? ' active' : ''), onclick: () => openRecentFile(it.sid) },
+      h('div', { class: 'rf-top' },
+        thumbEl,
+        h('div', { class: 'rf-info' },
+          h('div', { class: 'rf-title-row' },
+            h('b', { class: 'rf-title', title: it.title }, it.title || 'Unnamed Report'),
+            isActive ? h('span', { class: 'rf-current' }, 'Open') : null
+          ),
+          it.subtitle ? h('div', { class: 'rf-sub', title: it.subtitle }, it.subtitle) : null,
+          h('div', { class: 'rf-meta' }, `${it.pictures} picture${it.pictures !== 1 ? 's' : ''}${it.cases_count ? ` \u00b7 ${it.cases_count} case${it.cases_count !== 1 ? 's' : ''}` : ''}`)
+        ),
+        h('button', { class: 'rf-del', type: 'button', title: 'Delete this saved file', onclick: e => { e.stopPropagation(); deleteRecentFile(it.sid, it.title); } }, '\u2715')
+      ),
+      h('div', { class: 'rf-badges' },
+        statusBadge,
+        h('span', { class: 'rf-detail' }, detailText)
+      ),
+      h('div', { class: 'rf-datetime' },
+        h('span', { class: 'rf-dt-main' }, `\ud83d\udcc5 ${it.saved_dt || ''}`),
+        h('span', { class: 'rf-ago' }, ago(it.saved_at))
+      ),
+      h('div', { class: 'rf-actions' },
+        h('button', { class: isActive ? 'secondary rf-open' : 'primary rf-open', type: 'button', onclick: e => { e.stopPropagation(); openRecentFile(it.sid); } },
+          isActive ? 'Currently Open' : (isFull ? 'Open Complete File' : 'Continue Editing'))
+      )
+    );
+  }));
+}
+
+async function openRecentFile(sid) {
+  try {
+    if (!$('#s-review').hidden && S.sid && S.sid !== sid) {
+      await saveStateNow(false).catch(() => {});
+    }
+    busy('Opening saved file ...');
+    const r = await api(`/api/session/${sid}`);
+    busy(false);
+    if (!r.found) { showAlert('That saved file could not be found.'); return; }
+    if (r.stage === 'upload') {
+      await restoreUploadDraft(r);
+      if (r.entry) updateSaveIndicator(r.entry);
+    } else {
+      resume(r);
+      if (r.entry) updateSaveIndicator(r.entry);
+      await loadRecentFiles();
+    }
+  } catch (e) {
+    busy(false);
+    showAlert(e.message);
+  }
+}
+
+async function deleteRecentFile(sid, title) {
+  await post('/api/discard', { sid }).catch(() => {});
+  if (S.sid === sid) {
+    const box = $('#recent-save-state');
+    if (box) box.hidden = true;
+  }
+  if (typeof U !== 'undefined' && U.sid === sid) U.sid = null;
+  await loadRecentFiles();
+  const resEl = $('#resume');
+  if (resEl) resEl.replaceChildren();
+  toast(`Removed "${title || 'Saved file'}" from Recent Files.`, 'info', 4000);
+}
+
 async function checkResume() {
+  await loadRecentFiles();
   try {
     const r = await api('/api/last');
     if (!r.found || !r.state || ![2, 3].includes(r.state.ver)) return;
+    const statusBadge = r.status === 'full' ? 'Fully Saved' : 'Partially Saved';
     $('#resume').replaceChildren(h('div', { class: 'resume' },
-      h('div', { class: 'grow' }, h('b', {}, 'Continue your last report?'), h('br'),
-        h('span', {}, `${r.title || 'Unnamed report'}  \u00b7  ${r.pictures} pictures  \u00b7  saved ${ago(r.saved_at)}`)),
+      h('div', { class: 'grow' }, h('b', {}, 'Continue your last saved report?'), h('br'),
+        h('span', {}, `${r.title || 'Unnamed report'}  \u00b7  ${statusBadge}  \u00b7  ${r.pictures} pictures  \u00b7  ${r.saved_dt || ('saved ' + ago(r.saved_at))}`)),
       h('button', { class: 'primary', type: 'button', onclick: () => resume(r) }, 'Continue'),
-      h('button', { class: 'secondary', type: 'button', onclick: async () => { await post('/api/discard', { sid: r.sid }).catch(() => {}); $('#resume').replaceChildren(); } }, 'Discard')));
+      h('button', { class: 'secondary', type: 'button', onclick: async () => { await deleteRecentFile(r.sid, r.title); } }, 'Discard')));
   } catch (e) { /* nothing to resume */ }
 }
 function resume(r) {
@@ -220,6 +408,7 @@ function resume(r) {
   S.checks = []; S.suggest = null; S.layoutPlan = null; S.build = freshBuild(); S.missing = r.state.missing || S.missing;
   $('#resume').replaceChildren();
   show('review'); renderReview(); scheduleDerive(); setTimeout(() => buildNow().catch(() => {}), 60);
+  loadRecentFiles();
 }
 
 // ───────────────────────────── start the review ─────────────────────────────
@@ -257,6 +446,7 @@ function startReview(r) {
   show('review');
   renderReview();
   scheduleDerive();
+  saveStateNow(false).catch(() => {});
   setTimeout(() => buildNow().catch(() => {}), 60);                 // the preview appears by itself, nobody has to ask for it
 }
 
@@ -1081,6 +1271,7 @@ function previewCard() {
     h('div', { class: 'pv-actions' },
       h('label', { class: 'miss' }, h('span', {}, 'If a picture is missing:'), missing),
       h('span', { class: 'grow' }),
+      h('button', { class: 'secondary save-action', type: 'button', onclick: () => saveCurrentWork(true) }, ico('save'), 'Save File'),
       h('button', { class: 'secondary', type: 'button', 'data-dl': 'pdf', onclick: () => downloadReport('pdf') }, ico('download'), 'Download PDF'),
       h('button', { class: 'primary', type: 'button', 'data-dl': 'pptx', onclick: () => downloadReport('pptx') }, ico('download'), 'Download PowerPoint')));
 }

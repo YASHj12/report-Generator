@@ -15,7 +15,7 @@ const NCASE_HELP = {
   many: n => `I will look for ${n} load cases. If the pictures make a different number, I tell you.`,
 };
 
-const U = { mode: 'bulk', ncases: '', zones: 2, items: [], seq: 0 };
+const U = { sid: null, mode: 'bulk', ncases: '', zones: 2, items: [], seq: 0 };
 const ncasesValue = () => (/^\d+$/.test(U.ncases) ? parseInt(U.ncases, 10) : null);
 const caseChoices = () => { const n = ncasesValue(); return Math.max(n || 0, n ? n : U.mode === 'cases' ? U.zones : 6, 2); };
 const fmtSize = b => (b > 1048576 ? (b / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(b / 1024)) + ' KB');
@@ -27,7 +27,8 @@ function initUpload() {
   sel.addEventListener('change', () => { U.ncases = sel.value; syncSetup(); renderZones(); renderList(); });
   $$('#up-mode button').forEach(b => b.addEventListener('click', () => { U.mode = b.dataset.mode; syncSetup(); renderZones(); renderList(); }));
   $('#up-read').addEventListener('click', readPictures);
-  $('#up-clear').addEventListener('click', () => { U.items.forEach(it => URL.revokeObjectURL(it.url)); U.items = []; renderZones(); renderList(); });
+  if ($('#up-save')) $('#up-save').addEventListener('click', saveUploadDraft);
+  $('#up-clear').addEventListener('click', () => { U.items.forEach(it => URL.revokeObjectURL(it.url)); U.items = []; U.sid = null; renderZones(); renderList(); });
   window.addEventListener('dragover', e => e.preventDefault());
   window.addEventListener('drop', e => e.preventDefault());
   syncSetup(); renderZones(); renderList();
@@ -99,6 +100,7 @@ function renderList() {
   const card = $('#up-listcard'), n = U.items.length;
   card.hidden = n === 0;
   $('#up-read').disabled = n === 0;
+  if ($('#up-save')) $('#up-save').disabled = n === 0;
   $('#up-count').textContent = n ? `${n} picture${n > 1 ? 's' : ''} ready` : '';
   $('#up-clear').hidden = n === 0;
   if (!n) { $('#up-list').replaceChildren(); return; }
@@ -142,6 +144,63 @@ function manifestOf(it) {
   return m;
 }
 
+async function saveUploadDraft() {
+  const items = U.items;
+  if (!items.length) { showAlert('Please add pictures first before saving.', 'warn'); return; }
+  busy(`Saving ${items.length} picture${items.length > 1 ? 's' : ''} to Recent Files ...`);
+  const fd = new FormData();
+  items.forEach(it => fd.append('files', it.file, it.file.name));
+  fd.append('items', JSON.stringify(items.map(it => ({ name: it.name, type: it.type, kind: it.kind, view: it.view, case: it.case }))));
+  fd.append('mode', U.mode);
+  fd.append('ncases', U.ncases || '');
+  fd.append('zones', String(U.zones));
+  if (U.sid) fd.append('sid', U.sid);
+  try {
+    const r = await api('/api/save_upload', { method: 'POST', body: fd });
+    U.sid = r.sid;
+    if (typeof loadRecentFiles === 'function') await loadRecentFiles();
+    if (typeof showSaveConfirmation === 'function') showSaveConfirmation(r.entry || { title: `Upload Draft (${items.length} pictures)`, status_label: 'Partially Saved', saved_dt: r.saved_dt });
+  } catch (e) { showAlert(e.message); }
+  finally { busy(false); }
+}
+
+async function restoreUploadDraft(r) {
+  const up = r.upload || {};
+  const items = up.items || [];
+  busy(`Opening saved draft (${items.length} picture${items.length !== 1 ? 's' : ''}) ...`);
+  try {
+    U.items.forEach(it => URL.revokeObjectURL(it.url));
+    U.items = [];
+    U.sid = r.sid;
+    U.mode = up.mode || 'bulk';
+    U.ncases = up.ncases || '';
+    U.zones = up.zones || 2;
+    const sel = $('#up-ncases');
+    if (sel) sel.value = U.ncases;
+    for (const meta of items) {
+      const resp = await fetch(`/api/upload_img/${r.sid}/${meta.idx}`);
+      if (!resp.ok) continue;
+      const blob = await resp.blob();
+      const file = new File([blob], meta.filename, { type: blob.type || 'image/png' });
+      U.items.push({
+        id: ++U.seq,
+        file,
+        url: URL.createObjectURL(file),
+        name: meta.name || '',
+        type: meta.type || 'auto',
+        kind: meta.kind || '',
+        view: meta.view || '',
+        case: meta.case !== undefined && meta.case !== null ? meta.case : '',
+      });
+    }
+    show('upload');
+    syncSetup(); renderZones(); renderList();
+    if (typeof loadRecentFiles === 'function') loadRecentFiles();
+    toast(h('div', {}, h('b', {}, 'Opened saved draft'), h('br'), `${items.length} picture${items.length !== 1 ? 's' : ''} restored (${r.saved_dt || ''})`), 'ok', 6000);
+  } catch (e) { showAlert(e.message); }
+  finally { busy(false); }
+}
+
 async function readPictures() {
   const items = U.items;
   if (!items.length) { showAlert('Please add the pictures first (drag them into the box).'); return; }
@@ -151,9 +210,10 @@ async function readPictures() {
   items.forEach(it => fd.append('files', it.file, it.file.name));
   fd.append('manifest', JSON.stringify(items.map(manifestOf)));
   const nc = ncasesValue(); if (nc) fd.append('ncases', String(nc));
+  if (U.sid) fd.append('sid', U.sid);
   try {
     startReview(await api('/api/analyze', { method: 'POST', body: fd, signal: ac.signal }));
-    U.items.forEach(it => URL.revokeObjectURL(it.url)); U.items = []; renderZones(); renderList();      // the next report starts with an empty list
+    U.items.forEach(it => URL.revokeObjectURL(it.url)); U.items = []; U.sid = null; renderZones(); renderList();      // the next report starts with an empty list
   }
   catch (e) { if (ac.signal.aborted) showAlert('Cancelled. Press "Read the pictures" when you are ready.', 'warn'); else showAlert(e.message); }
   finally { busy(false); }

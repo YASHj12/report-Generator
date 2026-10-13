@@ -20,10 +20,18 @@
       <li data-stage="review"><i>2</i>Review &amp; preview</li>
       <li data-stage="done"><i>3</i>Download</li>
     </ol>
+    <div class="top-actions">
+      <button id="btn-top-save" class="top-btn save-btn" type="button" title="Save current report (partially or fully) to Recent Files">
+        <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+        <span>Save</span>
+      </button>
+      <button id="btn-new-report" class="top-btn" type="button" title="Start a new report">+ New</button>
+    </div>
     <div class="chips" id="chips"></div>
   </div>
 </header>
 
+<div class="page-wrap">
 <main id="main">
   <div id="alert" class="alert" hidden></div>
 
@@ -65,6 +73,10 @@
 
     <div class="up-go">
       <button id="up-read" class="primary big" type="button" disabled>Read the pictures</button>
+      <button id="up-save" class="secondary big" type="button" disabled title="Save these uploaded pictures to Recent Files for later">
+        <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+        Save File
+      </button>
       <button id="up-clear" class="link" type="button">Remove all</button>
       <span id="up-count" class="up-count"></span>
     </div>
@@ -84,9 +96,31 @@
 
 </main>
 
+<!-- ───────── Recent Files Sidebar (on one side of the page) ───────── -->
+<aside id="recent-aside" class="recent-aside" aria-label="Recent saved files">
+  <div class="recent-card">
+    <div class="recent-head">
+      <div class="recent-title-wrap">
+        <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15.5 14"/></svg>
+        <h2>Recent Files</h2>
+        <span id="recent-count" class="recent-badge">0</span>
+      </div>
+      <button id="btn-aside-save" class="save-pill" type="button" title="Save current work to Recent Files">
+        <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+        Save
+      </button>
+    </div>
+    <p class="recent-sub">Saved files (partially or fully completed) with date &amp; time.</p>
+    <div id="recent-save-state" class="recent-save-state" hidden></div>
+    <div id="recent-list" class="recent-list"></div>
+  </div>
+</aside>
+</div>
+
 <footer id="bar" class="bar" hidden>
   <div class="bar-in">
     <div id="bar-msg" class="bar-msg"></div>
+    <button id="btn-save" class="secondary save-action" type="button"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg><span class="lbl">Save File</span></button>
     <button id="btn-preview" class="secondary" type="button"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.7-7 10-7 10 7 10 7-3.7 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg><span class="lbl">Preview</span></button>
     <button id="btn-pdf" class="secondary" type="button" data-dl="pdf"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11m0 0l-4.5-4.5M12 15l4.5-4.5M5 20h14"/></svg><span class="dlw">Download </span>PDF</button>
     <button id="btn-pptx" class="primary" type="button" data-dl="pptx"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11m0 0l-4.5-4.5M12 15l4.5-4.5M5 20h14"/></svg><span class="dlw">Download </span>PowerPoint</button>
