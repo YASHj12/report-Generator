@@ -6,6 +6,15 @@ const RESULT_OPTIONS = [['', 'Not sure'], ['vm', 'Von-Mises (equivalent) stress'
   ['max_principal', 'Maximum principal stress'], ['min_principal', 'Minimum principal stress'], ['mid_principal', 'Middle principal stress'],
   ['intensity', 'Stress intensity'], ['normal', 'Normal stress'], ['dir_def', 'Directional deformation'], ['strain', 'Elastic strain'], ['safety', 'Safety factor']];
 const VIEW_OPTIONS = [['', 'Not sure'], ['zoom', 'Zoomed view'], ['section', 'Cut section']];
+const DUP_OPTIONS = [
+  ['', 'Choose: same or separate slide ...'],
+  ['same', 'Same slide'],
+  ['same_section', 'Same slide \u2014 as Cut section'],
+  ['same_zoom', 'Same slide \u2014 as Zoomed section'],
+  ['separate', 'Separate slides'],
+  ['sep_section', 'Separate slides \u2014 as Cut section'],
+  ['sep_zoom', 'Separate slides \u2014 as Zoomed section'],
+];
 const UP_TYPES = [['auto', 'Let the app decide'], ['geometry', 'Geometry (the model)'], ['mesh', 'Mesh'], ['bc', 'Setup: loads & supports'],
   ['deformation', 'Total deformation'], ['stress', 'Von-Mises (equivalent) stress'], ['x_other', 'Another result: shear, principal, one part ...'],
   ['view', 'Zoomed or cut-section picture'], ['unused', 'Do not use']];
@@ -109,12 +118,21 @@ function renderZones() {
 }
 
 // ───── the pictures that were added
+function upDupKey(it) {
+  if (!it || ['auto', 'unused', 'view'].includes(it.type)) return null;
+  if (it.type === 'geometry' || it.type === 'mesh') return it.type;
+  const c = it.case || (ncasesValue() === 1 ? '1' : '');
+  if (!c) return null;
+  if (it.type === 'x_other') return `x_other:${c}:${it.kind || ''}`;
+  return `${it.type}:${c}`;
+}
+
 function addFiles(files, zone) {
   const pics = files.filter(f => /\.(png|jpe?g|bmp|tiff?|webp)$/i.test(f.name));
   const bad = files.length - pics.length;
   if (bad) showAlert(`${bad} file${bad > 1 ? 's were' : ' was'} left out: only picture files (PNG or JPG) can be used.`, 'warn'); else hideAlert();
   for (const f of pics) {
-    U.items.push({ id: ++U.seq, file: f, url: URL.createObjectURL(f), name: '', type: 'auto', kind: '', view: '', case: typeof zone === 'number' ? zone : '' });
+    U.items.push({ id: ++U.seq, file: f, url: URL.createObjectURL(f), name: '', type: 'auto', kind: '', view: '', dup_mode: '', case: typeof zone === 'number' ? zone : '' });
   }
   if (typeof zone === 'number' && zone > U.zones) U.zones = zone;
   renderZones(); renderList();
@@ -130,33 +148,67 @@ function renderList() {
   $('#up-count').textContent = n ? `${n} picture${n > 1 ? 's' : ''} ready` : '';
   $('#up-clear').hidden = n === 0;
   if (!n) { $('#up-list').replaceChildren(); return; }
+  const dupWraps = new Map();
+  const refreshUpDups = () => {
+    const counts = new Map();
+    for (const it of U.items) {
+      const k = upDupKey(it);
+      if (k) counts.set(k, (counts.get(k) || 0) + 1);
+    }
+    for (const it of U.items) {
+      const w = dupWraps.get(it.id);
+      if (!w) continue;
+      const k = upDupKey(it);
+      w.hidden = !(k && (counts.get(k) || 0) > 1);
+    }
+  };
   const rows = U.items.map(it => {
     const name = h('input', { type: 'text', value: it.name, 'aria-label': `Name of ${it.file.name}`, placeholder: 'optional, e.g. case 2 equivalent stress' });
     name.addEventListener('input', () => { it.name = name.value; });
     const type = h('select', { class: 'sel', 'aria-label': `What is ${it.file.name}` }, UP_TYPES.map(([v, t]) => h('option', { value: v, selected: v === it.type }, t)));
     const kind = h('select', { class: 'sub-sel', 'aria-label': `Which result is ${it.file.name}` }, RESULT_OPTIONS.map(([v, t]) => h('option', { value: v, selected: v === it.kind }, t)));
     const view = h('select', { class: 'sub-sel', 'aria-label': `Kind of picture ${it.file.name}` }, VIEW_OPTIONS.map(([v, t]) => h('option', { value: v, selected: v === it.view }, t)));
+    const dupSel = h('select', { class: 'sub-sel dup-sel', 'aria-label': `Slide placement for duplicate category of ${it.file.name}` },
+      DUP_OPTIONS.map(([v, t]) => h('option', { value: v, selected: v === (it.dup_mode || '') }, t)));
     const kindWrap = h('label', { class: 'sub' }, h('span', {}, 'Which result?'), kind), viewWrap = h('label', { class: 'sub' }, h('span', {}, 'Kind of picture'), view);
+    const dupWrap = h('label', { class: 'sub dup-ask', hidden: true },
+      h('span', {}, 'Same category selected \u2014 place on slide as:'), dupSel);
+    dupWraps.set(it.id, dupWrap);
     const cs = h('select', { class: 'cs', 'aria-label': `Load case of ${it.file.name}` }, h('option', { value: '', selected: !it.case }, 'Auto'),
       Array.from({ length: caseChoices() }, (_, i) => h('option', { value: String(i + 1), selected: String(it.case) === String(i + 1) }, `Case ${i + 1}`)));
     const sync = () => {
       kindWrap.hidden = it.type !== 'x_other'; viewWrap.hidden = it.type !== 'view';
       const noCase = ['geometry', 'mesh', 'unused'].includes(it.type); cs.disabled = noCase;
       name.placeholder = it.type === 'view' ? 'what it shows, e.g. equivalent stress' : it.type === 'x_other' ? 'the part, e.g. shaft' : 'optional, e.g. case 2 equivalent stress';
+      refreshUpDups();
     };
     type.addEventListener('change', () => { it.type = type.value; if (['geometry', 'mesh', 'unused'].includes(it.type)) { it.case = ''; cs.value = ''; } sync(); });
-    kind.addEventListener('change', () => { it.kind = kind.value; });
+    kind.addEventListener('change', () => { it.kind = kind.value; refreshUpDups(); });
     view.addEventListener('change', () => { it.view = view.value; });
-    cs.addEventListener('change', () => { it.case = cs.value; zoneCountText(); });
+    dupSel.addEventListener('change', () => {
+      it.dup_mode = dupSel.value;
+      const k = upDupKey(it);
+      if (k) {
+        U.items.forEach(other => {
+          if (other !== it && upDupKey(other) === k && !other.dup_mode) {
+            other.dup_mode = dupSel.value;
+            const ow = dupWraps.get(other.id);
+            if (ow) { const os = ow.querySelector('select'); if (os) os.value = dupSel.value; }
+          }
+        });
+      }
+    });
+    cs.addEventListener('change', () => { it.case = cs.value; zoneCountText(); refreshUpDups(); });
     sync();
     const im = h('img', { class: 'thumb', src: it.url, alt: '', title: 'Click to enlarge' });
     im.addEventListener('click', () => lightbox(it.url));
     return h('tr', {}, h('td', {}, im), h('td', { class: 'fn' }, it.file.name, h('small', {}, fmtSize(it.file.size))),
-      h('td', {}, name), h('td', {}, type, kindWrap, viewWrap), h('td', {}, cs),
+      h('td', {}, name), h('td', {}, type, kindWrap, viewWrap, dupWrap), h('td', {}, cs),
       h('td', {}, h('button', { class: 'icon', type: 'button', title: 'Remove this picture', onclick: () => removeItem(it) }, '\u2715')));
   });
   $('#up-list').replaceChildren(h('table', { class: 'pics up' },
     h('thead', {}, h('tr', {}, ['', 'File', 'Name (what it shows)', 'What is it?', 'Load case', ''].map(t => h('th', {}, t)))), h('tbody', {}, rows)));
+  refreshUpDups();
 }
 
 // ───── send them to the program
@@ -170,6 +222,7 @@ function manifestOf(it, caseMap) {
   if (it.type && it.type !== 'auto') m.role = it.type;
   if (it.type === 'x_other' && it.kind) m.kind = it.kind;
   if (it.type === 'view' && it.view) m.view = it.view;
+  if (it.dup_mode) m.dup_mode = it.dup_mode;
   return m;
 }
 
@@ -179,7 +232,7 @@ async function saveUploadDraft() {
   busy(`Saving ${items.length} picture${items.length > 1 ? 's' : ''} to Recent Files ...`);
   const fd = new FormData();
   items.forEach(it => fd.append('files', it.file, it.file.name));
-  fd.append('items', JSON.stringify(items.map(it => ({ name: it.name, type: it.type, kind: it.kind, view: it.view, case: it.case }))));
+  fd.append('items', JSON.stringify(items.map(it => ({ name: it.name, type: it.type, kind: it.kind, view: it.view, dup_mode: it.dup_mode || '', case: it.case }))));
   fd.append('mode', U.mode);
   fd.append('ncases', U.ncases || '');
   fd.append('zones', String(U.zones));
@@ -219,6 +272,7 @@ async function restoreUploadDraft(r) {
         type: meta.type || 'auto',
         kind: meta.kind || '',
         view: meta.view || '',
+        dup_mode: meta.dup_mode || '',
         case: meta.case !== undefined && meta.case !== null ? meta.case : '',
       });
     }

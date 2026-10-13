@@ -261,6 +261,8 @@ def clean_hint(m):
             h["kind"] = m["kind"]
         if isinstance(m.get("view"), str) and m["view"] in ("zoom", "section"):
             h["view"] = m["view"]
+        if isinstance(m.get("dup_mode"), str) and m["dup_mode"] in ("same", "same_section", "same_zoom", "separate", "sep_section", "sep_zoom"):
+            h["dup_mode"] = m["dup_mode"]
     except Exception:                                                     # noqa: BLE001 - a strange hint is simply not used
         return None
     return h or None
@@ -1219,7 +1221,8 @@ def build_cfg(p: dict, infos: list, out_path: Path) -> dict:
             path = pic(v.get("id"))
             if not path:
                 continue
-            d = {"heading": (v.get("heading") or "").strip() or f"View {k}", "image": path}
+            d = {"heading": (v.get("heading") or "").strip() or f"View {k}", "image": path,
+                 "dup_mode": (v.get("dup_mode") or "").strip()}
             if (v.get("caption") or "").strip():
                 d["caption"] = v["caption"].strip()
             out.append(d)
@@ -1240,7 +1243,15 @@ def build_cfg(p: dict, infos: list, out_path: Path) -> dict:
     def view_block(vs):
         if not vs:
             return {}
-        return {"image": vs[0]["image"]} if len(vs) == 1 else {"images": vs}
+        if len(vs) == 1:
+            return {"image": vs[0]["image"]}
+        blk = {"images": vs}
+        modes = [v.get("dup_mode") or "" for v in vs if v.get("dup_mode")]
+        if any(m.startswith("sep") for m in modes):
+            blk["layout"] = "separate"
+        elif any(m.startswith("same") for m in modes):
+            blk["layout"] = "side"
+        return blk
 
     geometry = view_block(views(p.get("geometry")))
     mesh = view_block(views(p.get("meshes")))
@@ -1269,6 +1280,13 @@ def build_cfg(p: dict, infos: list, out_path: Path) -> dict:
             path = pic(pid)
             if path:
                 case[key] = path
+        bc_same = []
+        for bx in (c.get("bc_extra_same") or []):
+            path = pic(bx.get("id"))
+            if path:
+                bc_same.append({"image": path, "heading": (bx.get("heading") or "").strip() or "View 2"})
+        if bc_same:
+            case["bc_extra_same"] = bc_same
         if d is not None:
             case["max_deformation_mm"] = d
         if sx is not None:
@@ -1320,6 +1338,8 @@ def build_cfg(p: dict, infos: list, out_path: Path) -> dict:
             ex = {"kind": e["kind"], "heading": (e.get("heading") or "").strip() or "Additional view", "image": path}
             if (e.get("caption") or "").strip():
                 ex["caption"] = e["caption"].strip()
+            if e.get("layout") in ("side", "stack", "separate"):
+                ex["layout"] = e["layout"]
             extras.append(ex)
         if extras:
             case["extras"] = extras

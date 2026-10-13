@@ -438,6 +438,7 @@ function newCase(dc) {
   return Object.assign({}, dc, {
     def_max: nice(dc.def_max), stress_max: nice(dc.stress_max), notes: [], texts: {}, dirty: diffShort ? { short: true } : {}, obs: [], exceeds: null, tier: null,
     needsBasis: false, bc_items: dc.bc_items.slice(), bc_legend: (dc.bc_legend || []).slice(),
+    bc_extra_same: (dc.bc_extra_same || []).slice(),
     basis: '', sing_loc: '', stress_away: '', loc_stress: '', loc_def: '', react_applied: '', react_sum: '', layout: '', bc_layout: '',
     extras: (dc.extras || []).map(e => Object.assign({}, e, { caption: '' })),
     more: (dc.more || []).map(m => Object.assign({}, m, { max: nice(m.max), min: nice(m.min), allow: '', caption_edit: '', auto_caption: '', tier: null })),
@@ -461,8 +462,8 @@ function startReview(r) {
   S.meshStats = { type: '', elements: '', nodes: '', size: '', skew_avg: '', skew_max: '', oq_min: '' };
   S.assumed = {}; S.assumeCustom = '';
   S.layouts = { results: 'auto', geometry: 'auto', bc: 'auto', extras: 'auto' };
-  S.geometry = r.geometry.map(g => ({ id: g.id, heading: g.heading, caption: '' }));
-  S.meshes = r.meshes.map(g => ({ id: g.id, heading: g.heading, caption: '' }));
+  S.geometry = r.geometry.map(g => ({ id: g.id, heading: g.heading, caption: '', dup_mode: g.dup_mode || '' }));
+  S.meshes = r.meshes.map(g => ({ id: g.id, heading: g.heading, caption: '', dup_mode: g.dup_mode || '' }));
   S.cases = r.cases.map(newCase).filter(caseHasFiles);
   S.unordered = r.unordered || [];
   show('review');
@@ -591,7 +592,21 @@ function optSelect(label, options, current, onchange, cls = 'sub-sel') {
   return sel;
 }
 
+function revDupKey(img) {
+  if (!img || ['unknown', 'unused', 'view'].includes(img.role)) return null;
+  if (img.role === 'geometry' || img.role === 'mesh') return img.role;
+  if (!img.case) return null;
+  const baseRole = img.role.replace(/^x_/, '');
+  if (baseRole === 'other') return `other:${img.case}:${img.kind || ''}:${(img.scope || '').toLowerCase()}`;
+  return `${baseRole}:${img.case}`;
+}
+
 function picturesCard() {
+  const dupCounts = new Map();
+  for (const img of S.images) {
+    const dk = revDupKey(img);
+    if (dk) dupCounts.set(dk, (dupCounts.get(dk) || 0) + 1);
+  }
   const rows = S.images.map(img => {
     const role = h('select', { class: 'sel', 'data-need': 'role', 'data-label': `What is ${img.name}`, 'aria-label': `What is ${img.name}` },
       ROLES.filter(r => r[0] !== 'unknown' || img.role === 'unknown').map(([v, t]) => h('option', { value: v, selected: v === img.role }, t)));
@@ -616,7 +631,25 @@ function picturesCard() {
         optSelect(`Which plot does ${img.name} belong to`, [['', 'Choose the plot ...'], ...plotChoices().map(p => [p.id, p.text])], img.parent_id,
           v => { touch(img, 'parent_id', v === '' ? null : parseInt(v, 10)); regroup(); }, 'sub-sel parent')));
     }
-    const attn = img.notes.length || img.confidence === 'low' || img.role === 'unknown' || (isView && (img.parent_id === null || img.parent_id === undefined));
+    const dk = revDupKey(img);
+    const isDup = Boolean(dk && (dupCounts.get(dk) || 0) > 1);
+    if (isDup) {
+      const dupSel = optSelect(`Slide placement for duplicate category of ${img.name}`, DUP_OPTIONS, img.dup_mode || '', v => {
+        touch(img, 'dup_mode', v);
+        S.images.forEach(other => {
+          if (other !== img && revDupKey(other) === dk && !other.dup_mode) {
+            touch(other, 'dup_mode', v);
+          }
+        });
+        regroup();
+      }, 'sub-sel dup-sel');
+      dupSel.dataset.need = 'req';
+      dupSel.dataset.label = `Pictures: choose same or separate slide (cut section or zoomed section) for ${img.name}`;
+      extra.push(h('label', { class: 'sub dup-ask' },
+        h('span', {}, 'Same category selected \u2014 place on slide as:'),
+        dupSel));
+    }
+    const attn = img.notes.length || img.confidence === 'low' || img.role === 'unknown' || (isView && (img.parent_id === null || img.parent_id === undefined)) || (isDup && !img.dup_mode);
     const why = img.why ? h('div', { class: 'why' }, 'Why: ', img.why) : null;
     return h('tr', { class: attn ? 'attn' : '' }, h('td', {}, thumb(img.id)), h('td', { class: 'fn' }, img.name, img.label ? h('small', {}, `your name: ${img.label}`) : null),
       h('td', {}, role, ...extra), h('td', {}, cs), h('td', { class: 'read' }, readSummary(img), why,
@@ -1134,8 +1167,8 @@ async function regroup() {
     S.images = r.images; S.warnings = r.warnings;
     const keep = (oldList, id) => oldList.find(o => o.id === id);
     const og = S.geometry, om = S.meshes;
-    S.geometry = r.geometry.map(g => { const o = keep(og, g.id); return { id: g.id, heading: o ? o.heading : g.heading, caption: o ? o.caption : '' }; });
-    S.meshes = r.meshes.map(g => { const o = keep(om, g.id); return { id: g.id, heading: o ? o.heading : g.heading, caption: o ? o.caption : '' }; });
+    S.geometry = r.geometry.map(g => { const o = keep(og, g.id); return { id: g.id, heading: g.dup_mode ? g.heading : (o ? o.heading : g.heading), caption: o ? o.caption : '', dup_mode: g.dup_mode || '' }; });
+    S.meshes = r.meshes.map(g => { const o = keep(om, g.id); return { id: g.id, heading: g.dup_mode ? g.heading : (o ? o.heading : g.heading), caption: o ? o.caption : '', dup_mode: g.dup_mode || '' }; });
     const old = new Map(S.cases.map(c => [c.n, c]));
     S.cases = r.cases.map(dc => {
       const o = old.get(dc.n);
@@ -1143,9 +1176,10 @@ async function regroup() {
       const c = Object.assign({}, o);
       const bcChanged = o.bc_id !== dc.bc_id;
       c.bc_id = dc.bc_id; c.def_id = dc.def_id; c.stress_id = dc.stress_id;
+      c.bc_extra_same = (dc.bc_extra_same || []).slice();
       c.stress_red_px = dc.stress_red_px; c.stress_legend = dc.stress_legend; c.stress_unit = dc.stress_unit; c.def_unit = dc.def_unit;
       c.gravity = dc.gravity; c.legend_px = dc.legend_px;
-      c.extras = dc.extras.map(e => { const oe = (o.extras || []).find(x => x.id === e.id); return Object.assign({}, e, { heading: oe ? oe.heading : e.heading, caption: oe ? oe.caption : '' }); });
+      c.extras = dc.extras.map(e => { const oe = (o.extras || []).find(x => x.id === e.id); return Object.assign({}, e, { heading: e.layout ? e.heading : (oe ? oe.heading : e.heading), caption: oe ? oe.caption : '' }); });
       c.more = (dc.more || []).map(m => { const om = (o.more || []).find(x => x.id === m.id);
         return Object.assign({}, m, { max: nice(om ? om.max : m.max), min: nice(om ? om.min : m.min), allow: om ? om.allow : '', caption_edit: om ? om.caption_edit : '',
                                       auto_caption: om ? om.auto_caption : '', tier: om ? om.tier : null }); });
@@ -1258,13 +1292,13 @@ function buildPayload() {
   return {
     sid: S.sid, cover: S.cover, short: S.short, fos: S.fos, yield: num(row.yield), allowable: govAllow(), show_utilisation: S.showUtil, def_limit: num(S.defLimit),
     material: { rows: S.mat.rows.map(r => [r.material, r.item, r.E, r.nu, r.rho, r.yield, String(allowOf(r) ?? '')]), units: S.units },
-    geometry: S.geometry.map(g => ({ id: g.id, heading: g.heading, caption: g.caption })),
-    meshes: S.meshes.map(g => ({ id: g.id, heading: g.heading, caption: g.caption })), mesh_stats: S.meshStats,
+    geometry: S.geometry.map(g => ({ id: g.id, heading: g.heading, caption: g.caption, dup_mode: g.dup_mode || '' })),
+    meshes: S.meshes.map(g => ({ id: g.id, heading: g.heading, caption: g.caption, dup_mode: g.dup_mode || '' })), mesh_stats: S.meshStats,
     assumptions: assumptionsList(), layouts: S.layouts,
     cases: S.cases.filter(caseHasFiles).map(c => ({ n: c.n, name: c.name, subtitle: c.subtitle, short_name: c.short_name, bc_id: c.bc_id, def_id: c.def_id,
-      stress_id: c.stress_id, bc_items: c.bc_items, notes: c.notes, def_max: c.def_max, stress_max: c.stress_max, basis: c.basis, sing_loc: c.sing_loc,
+      stress_id: c.stress_id, bc_extra_same: c.bc_extra_same || [], bc_items: c.bc_items, notes: c.notes, def_max: c.def_max, stress_max: c.stress_max, basis: c.basis, sing_loc: c.sing_loc,
       stress_away: c.stress_away, loc_stress: c.loc_stress, loc_def: c.loc_def, react_applied: c.react_applied, react_sum: c.react_sum,
-      layout: c.layout, bc_layout: c.bc_layout, legend_px: c.legend_px, extras: c.extras.map(e => ({ id: e.id, kind: e.kind, heading: e.heading, caption: e.caption, max: e.max })),
+      layout: c.layout, bc_layout: c.bc_layout, legend_px: c.legend_px, extras: c.extras.map(e => ({ id: e.id, kind: e.kind, heading: e.heading, caption: e.caption, max: e.max, layout: e.layout })),
       more: c.more.map(m => ({ id: m.id, kind: m.kind, kind_label: m.kind_label, scope: m.scope, heading: m.heading, max: m.max, min: m.min, unit: m.unit, allow: m.allow, caption_edit: m.caption_edit })),
       views: c.views.map(v => ({ id: v.id, view_kind: v.view_kind, label: v.slide_label || '', parent_id: v.parent_id })),
       texts: textsPayload(c) })),

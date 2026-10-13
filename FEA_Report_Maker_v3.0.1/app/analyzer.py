@@ -755,6 +755,7 @@ def analyze_manual_one(path, idx: int, name=None, why: str = "ocr", hint=None) -
     info = _blank_info(idx, nm, path, W0, H0)
     info.update(role=role or "unknown", confidence="medium" if role else "low", manual=True, label=(hint.get("label") or "").strip(),
                 case_hint=case_no, user_set=bool(hint.get("role") not in (None, "", "auto")),
+                dup_mode=(hint.get("dup_mode") or "").strip(),
                 hash=hashlib.md5(Path(path).read_bytes()).hexdigest())
     if role in ("x_other", "deformation", "stress") and ph["kind"] and not hint.get("kind"):
         info["kind"] = ph["kind"]
@@ -868,12 +869,14 @@ def analyze_one(path, idx: int, name=None, hint=None) -> dict:
             info.update(view_kind=hint.get("view") or ph["view"] or "", parent_kind=hint.get("kind") or ph["kind"],
                         scope_hint=" ".join(ph["scope_words"]))
         info["why"] = "chosen by you"
+    if hint.get("dup_mode"):
+        info["dup_mode"] = str(hint["dup_mode"]).strip()
     extract_role_data(img, info, info["role"], k_an)
     return info
 
 
 def regroup(infos, assignments, settings=None):
-    """Apply the user's corrections {id, role, case, kind?, scope?, view_kind?, parent_id?, label?} and return the new draft."""
+    """Apply the user's corrections {id, role, case, kind?, scope?, view_kind?, parent_id?, label?, dup_mode?} and return the new draft."""
     by_id = {i["id"]: i for i in infos}
     for a in assignments:
         i = by_id.get(a["id"])
@@ -912,6 +915,8 @@ def regroup(infos, assignments, settings=None):
             i["view_kind"] = a["view_kind"]
         if "label" in a and a["label"] is not None:
             i["label"] = str(a["label"]).strip()
+        if "dup_mode" in a and a["dup_mode"] is not None:
+            i["dup_mode"] = str(a["dup_mode"]).strip()
         if "parent_id" in a:
             i["parent_id"] = a["parent_id"]
             i["parent_user"] = a["parent_id"] is not None
@@ -935,8 +940,19 @@ def _common_prefix(a, b):
     return n
 
 
+DUP_HEADING = {
+    "same_section": "Cut section",
+    "sep_section": "Cut section",
+    "same_zoom": "Zoomed section",
+    "sep_zoom": "Zoomed section",
+}
+
+
 def extra_heading(info):
     """Heading of an additional view - stays yellow until the engineer states WHERE (section line, detail position)."""
+    dm = (info.get("dup_mode") or "").strip()
+    if dm in DUP_HEADING:
+        return DUP_HEADING[dm]
     if info["role"] == "x_other" and info.get("result_kind"):
         return info["result_kind"]
     hint = file_hint(info["name"])
@@ -950,8 +966,7 @@ def extra_heading(info):
 def assign_cases(infos):
     """Group pictures into load cases -> list of case drafts (one per case number).
     A case has ONE main setup / deformation / stress picture (the one with the highest Max wins); further plots of the same kind
-    become additional views.  Results of a part ('Equivalent Stress Shaft') and the other result types (shear, principal ...) are
-    separate RESULTS ('more'); colour pictures without legend (zoomed, section) are VIEWS that belong to one of the plots."""
+    are placed on the same slide or on separate slides (as cut section or zoomed section) according to the user's choice in the Pictures tab."""
     by_id = {i["id"]: i for i in infos}
     raw_cases = sorted({int(i["case"]) for i in infos if i["role"] in CASE_ROLES and i.get("case")})
     case_map = {old_n: new_n for new_n, old_n in enumerate(raw_cases, 1)}
@@ -966,32 +981,63 @@ def assign_cases(infos):
     out = []
     for n in sorted(groups):
         g = groups[n]
-        c = {"n": n, "bc_id": None, "def_id": None, "stress_id": None, "extras": [], "demoted": [], "more": [], "views": []}
+        c = {"n": n, "bc_id": None, "def_id": None, "stress_id": None, "bc_extra_same": [], "extras": [], "demoted": [], "more": [], "views": []}
         for base, slot in MAIN_SLOTS:
             mains = [p for p in g.get(base, []) if p["role"] == base]
             if len(mains) > 1:
                 mains.sort(key=lambda p: (not p.get("user_set"), 0.0 if base == "bc" else -(p.get("max") or 0.0), p["id"]))
                 for p in mains[1:]:
-                    p["role"] = "x_" + base
                     p["auto_extra"] = True
                     c["demoted"].append((mains[0]["id"], p["id"], base))
+                    dm = (p.get("dup_mode") or "").strip()
+                    if not dm:
+                        fh = file_hint(p["name"])
+                        dm = "same_section" if fh == "section" else ("same_zoom" if fh == "detail" else "same_zoom")
+                    hd = DUP_HEADING.get(dm) or (p.get("label") or extra_heading(p))
+                    if dm.startswith("same"):
+                        if base in ("deformation", "stress"):
+                            vk = "section" if "section" in dm else "zoom"
+                            c["views"].append({"id": p["id"], "view_kind": vk, "label": DUP_HEADING.get(dm) or p.get("label") or "Detail view",
+                                               "parent_id": mains[0]["id"], "parent_conf": "sure",
+                                               "parent_kind": "deformation" if base == "deformation" else "vm",
+                                               "has_tag": bool(p.get("max_tag")), "from_dup": True, "dup_mode": dm})
+                        else:
+                            c["bc_extra_same"].append({"id": p["id"], "heading": DUP_HEADING.get(dm) or p.get("label") or "View 2", "dup_mode": dm})
+                    else:
+                        c["extras"].append({"id": p["id"], "kind": base, "heading": hd, "max": p.get("max"),
+                                            "unit": p.get("unit"), "auto": True, "layout": "separate", "from_dup": True, "dup_mode": dm})
             if mains:
                 c[slot] = mains[0]["id"]
+        other_groups = {}
         for p in infos:
             if p.get("case") != n:
                 continue
             if p["role"] in ("x_bc", "x_deformation", "x_stress"):
+                dm = (p.get("dup_mode") or "").strip()
+                lay = "separate" if dm.startswith("sep") else ("side" if dm.startswith("same") else "")
                 c["extras"].append({"id": p["id"], "kind": p["role"][2:], "heading": extra_heading(p), "max": p.get("max"),
-                                    "unit": p.get("unit"), "auto": bool(p.get("auto_extra"))})
+                                    "unit": p.get("unit"), "auto": bool(p.get("auto_extra")), "layout": lay, "dup_mode": dm})
             elif p["role"] == "x_other":
                 kid = p.get("kind") or ""
+                sc_key = (p.get("scope") or "").strip().lower()
+                other_groups.setdefault((kid, sc_key), []).append(p)
+        for (kid, _sc_key), plist in other_groups.items():
+            for idx_p, p in enumerate(plist):
                 short = KIND_BY_ID[kid][2] if kid in KIND_BY_ID else (p.get("result_kind") or "Result")
                 lo = p.get("min")
                 if kid in ("min_principal", "safety") and p.get("legend_values"):      # the number that matters is the LOW end: the bottom of the legend
                     lo = p["legend_values"][-1]
-                c["more"].append({"id": p["id"], "kind": kid, "kind_label": p.get("kind_label") or p.get("result_kind") or "", "scope": p.get("scope") or "",
-                                  "heading": short, "max": p.get("max"), "min": lo, "unit": p.get("unit") or (KIND_BY_ID[kid][4] if kid in KIND_BY_ID else ""),
-                                  "part": bool(p.get("scope"))})
+                dm = (p.get("dup_mode") or "").strip()
+                if idx_p > 0 and dm.startswith("same"):
+                    vk = "section" if "section" in dm else "zoom"
+                    c["views"].append({"id": p["id"], "view_kind": vk, "label": DUP_HEADING.get(dm) or p.get("label") or "Detail view",
+                                       "parent_id": plist[0]["id"], "parent_conf": "sure", "parent_kind": kid,
+                                       "has_tag": bool(p.get("max_tag")), "from_dup": True, "dup_mode": dm})
+                else:
+                    hd = f"{short} \u2013 {DUP_HEADING[dm]}" if (idx_p > 0 and dm in DUP_HEADING) else short
+                    c["more"].append({"id": p["id"], "kind": kid, "kind_label": p.get("kind_label") or p.get("result_kind") or "", "scope": p.get("scope") or "",
+                                      "heading": hd, "max": p.get("max"), "min": lo, "unit": p.get("unit") or (KIND_BY_ID[kid][4] if kid in KIND_BY_ID else ""),
+                                      "part": bool(p.get("scope")), "dup_mode": dm})
         first = {}
         for m in c["more"]:                                      # parts in the order they were uploaded; results of the whole model first
             first.setdefault(m["scope"].lower(), m["id"])
@@ -1011,14 +1057,12 @@ def assign_cases(infos):
             p["parent_id"], p["parent_conf"] = pid, conf
             c["views"].append({"id": p["id"], "view_kind": p.get("view_kind") or "", "label": p.get("label") or "", "parent_id": pid,
                                "parent_conf": conf, "parent_kind": p.get("parent_kind") or "", "has_tag": bool(p.get("max_tag"))})
-        bc_model = (bc or {}).get("model") or (d or s or {}).get("model")
+        # Use ONLY the Setup screenshot's first bold heading (bc['model']) for the Setup page main heading
+        bc_model = (bc or {}).get("model")
         if bc:
             name, sub = case_headline(bc.get("bc_legend") or [], bc_model)
             short_only, _ = case_headline(bc.get("bc_legend") or [])
             short_name = short_only or name
-        elif bc_model:
-            name, sub = case_headline([], bc_model)
-            short_name = name
         else:
             name, sub, short_name = "", "", ""
         pxs = [x["legend_px"] for x in (bc, d, s) if x and x.get("legend_px")]
@@ -1029,7 +1073,7 @@ def assign_cases(infos):
             def_max=d["max"] if d else None, stress_max=s["max"] if s else None,
             stress_red_px=s["red_px"] if s else None, stress_legend=s["legend_values"] if s else [],
             gravity=(bc or {}).get("gravity"), legend_px=(statistics.median(pxs) if pxs else None),
-            letter=(bc or d or s or {}).get("letter"), model=bc_model)
+            letter=(bc or d or s or {}).get("letter"), model=bc_model or (d or s or {}).get("model"))
         out.append(c)
     return out
 
@@ -1186,7 +1230,11 @@ def build_draft(infos, settings=None):
     cases = assign_cases(infos)
     geo, meshes = _views(infos, "geometry"), _views(infos, "mesh")
     heads = {}
-    for i in geo:
+    for idx_g, i in enumerate(geo):
+        dm = (i.get("dup_mode") or "").strip()
+        if idx_g >= 1 and dm in DUP_HEADING:
+            heads[i["id"]] = DUP_HEADING[dm]
+            continue
         h = {"up": "Top view", "down": "Bottom view"}.get(i.get("z_dir"), "")
         hint = file_hint(i["name"])
         if hint:
@@ -1194,11 +1242,16 @@ def build_draft(infos, settings=None):
         heads[i["id"]] = h
     for k, i in enumerate(geo, 1):                              # blank or repeated heading -> "View k"
         h = heads[i["id"]]
-        if not h or list(heads.values()).count(h) > 1:
+        if not h or (list(heads.values()).count(h) > 1 and h not in DUP_HEADING.values()):
             heads[i["id"]] = f"View {k}"
-    geo.sort(key=lambda i: {"Top view": 0, "Bottom view": 1}.get(heads[i["id"]], 2))        # top view first, whatever the upload order
+    if not any((i.get("dup_mode") or "").strip() for i in geo):
+        geo.sort(key=lambda i: {"Top view": 0, "Bottom view": 1}.get(heads[i["id"]], 2))        # top view first, whatever the upload order
     mheads = {}
     for k, i in enumerate(meshes):
+        dm = (i.get("dup_mode") or "").strip()
+        if k >= 1 and dm in DUP_HEADING:
+            mheads[i["id"]] = DUP_HEADING[dm]
+            continue
         hint = file_hint(i["name"])
         mheads[i["id"]] = "Overall mesh" if k == 0 and not hint else (
             f"{'Mesh section' if hint == 'section' else 'Mesh detail'} {PLACEHOLDER}" if hint else "Mesh detail [describe - please confirm]")
@@ -1246,8 +1299,8 @@ def build_draft(infos, settings=None):
     if not cases:
         warns.append({"level": "info", "text": "No load-case pictures (setup / deformation / stress) were recognised - the report would hold the cover, "
                                                "material, geometry and mesh slides only. Use the pictures table if some pictures were not recognised."})
-    return {"cases": cases, "geometry": [{"id": i["id"], "heading": heads[i["id"]]} for i in geo],
-            "meshes": [{"id": i["id"], "heading": mheads[i["id"]]} for i in meshes], "warnings": warns}
+    return {"cases": cases, "geometry": [{"id": i["id"], "heading": heads[i["id"]], "dup_mode": i.get("dup_mode") or ""} for i in geo],
+            "meshes": [{"id": i["id"], "heading": mheads[i["id"]], "dup_mode": i.get("dup_mode") or ""} for i in meshes], "warnings": warns}
 
 
 MANUAL_NOTE = ("The picture reader (Tesseract) is not installed, so I could not read the numbers from the pictures. "
@@ -1283,7 +1336,7 @@ def _blank_info(idx, name, path, W0, H0):
             "bc_legend": [], "bc_draft": [], "headline": ["", ""], "z_dir": None, "red_px": None, "edge_density": None,
             "result_kind": "", "legend_px": None, "gravity": None, "dup_of": None, "user_set": False,
             "kind": "", "kind_label": "", "scope": "", "view_kind": "", "parent_kind": "", "parent_id": None, "parent_conf": "",
-            "scope_hint": "", "label": "", "case_hint": None, "max_tag": None, "why": "", "case": None, "hash": ""}
+            "scope_hint": "", "label": "", "case_hint": None, "max_tag": None, "why": "", "case": None, "hash": "", "dup_mode": ""}
 
 
 def load_types(legend_lines):

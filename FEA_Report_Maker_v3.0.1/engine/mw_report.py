@@ -737,7 +737,24 @@ def build_bc(prs, n, case, autocrop, layout="side"):
     if layout == "stack":
         return _build_bc_stack(s, n, case, buf, size, items, notes)
     plan = _bc_side_plan(size, items, notes)
-    if buf is not None:
+    bc_same = case.get("bc_extra_same") or []
+    if buf is not None and bc_same:
+        bx0, by0, bx1, by1 = BC_IMG_BOX
+        total_imgs = 1 + len(bc_same)
+        gap_y = 8.0
+        slot_h = (by1 - by0 - gap_y * (total_imgs - 1)) / total_imgs
+        r0 = fit(size, (bx0, by0, bx1, by0 + slot_h), "l", "c")
+        place_picture(s, buf, r0, name=f"Case {n} boundary conditions", alt=f"Boundary conditions - {case['name']}")
+        for idx_s, bx_item in enumerate(bc_same, 1):
+            b2, sz2 = load_image(bx_item["image"], autocrop)
+            y_top = by0 + idx_s * (slot_h + gap_y)
+            hd2 = (bx_item.get("heading") or "").strip()
+            lh2 = INSET_LABEL_H if hd2 else 0.0
+            r2 = fit(sz2, (bx0, y_top + lh2, bx1, y_top + slot_h), "l", "c")
+            if hd2:
+                _inset_label(s, r2[0], r2[1] - lh2, r2[2], hd2, idx_s)
+            place_picture(s, b2, r2, name=f"Case {n} boundary conditions {idx_s + 1}", alt=f"Boundary conditions - {hd2 or case['name']}")
+    elif buf is not None:
         place_picture(s, buf, plan["rect"], name=f"Case {n} boundary conditions", alt=f"Boundary conditions - {case['name']}")
     dy, x0, right, fs, k = plan["dy"], plan["x0"], plan["right"], plan["fs"], plan["k"]
     add_text(s, x0, 103.2 + dy, right - x0, 22, [P([R("Boundary Conditions", 16, True, NAVY)])], wrap=False, name="BC heading")
@@ -1271,7 +1288,8 @@ def _build_extras(prs, pre, case, kind, autocrop, layout):
     else:
         single = lambda v: f"{base} \u2013 {v['heading']}"                              # noqa: E731
         multi = f"{base} \u2013 Additional views"
-    build_view_slides(prs, multi, views, autocrop, f"{EXTRA_LABEL[kind]} - additional view", layout, single_title=single)
+    eff_layout = "separate" if any(v.get("layout") == "separate" for v in views) else ("side" if any(v.get("layout") == "side" for v in views) else layout)
+    build_view_slides(prs, multi, views, autocrop, f"{EXTRA_LABEL[kind]} - additional view", eff_layout, single_title=single)
 
 
 def _bullet_total(texts, size, width=800.0, extra_last=None):
@@ -1442,7 +1460,7 @@ def build_report(cfg: dict, out: str | None = None) -> str:
     if _has_pics(g) or policy == "frame":
         title = g.get("title", f"{sec}. {label} Geometry")
         if g.get("images"):
-            build_view_slides(prs, title, g["images"], ac, f"Geometry of the {obj}", lay_views)
+            build_view_slides(prs, title, g["images"], ac, f"Geometry of the {obj}", g.get("layout") or lay_views)
         else:
             img = g.get("image") or placeholder_picture("Geometry picture not provided", size=(1200, 700))
             build_picture_slide(prs, title, img, ac, f"Geometry of the {obj}")
@@ -1455,7 +1473,7 @@ def build_report(cfg: dict, out: str | None = None) -> str:
     if _has_pics(m) or policy == "frame" or stats:
         title = m.get("title", f"{sec}. {label} Mesh")
         if m.get("images"):
-            build_view_slides(prs, title, m["images"], ac, f"Finite element mesh of the {obj}", lay_views, note=stats)
+            build_view_slides(prs, title, m["images"], ac, f"Finite element mesh of the {obj}", m.get("layout") or lay_views, note=stats)
         else:
             img = m.get("image") or placeholder_picture("Mesh picture not provided", size=(1200, 700))
             build_picture_slide(prs, title, img, ac, f"Finite element mesh of the {obj}", caption=stats)
