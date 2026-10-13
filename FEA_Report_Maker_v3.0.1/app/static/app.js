@@ -803,11 +803,16 @@ function renderViews(c, box) {
     const lab = h('input', { type: 'text', value: nice(v.slide_label), placeholder: VIEW_DEFAULT[v.view_kind] || 'Detail view', 'aria-label': 'Label on the slide' });
     lab.addEventListener('input', () => { v.slide_label = lab.value; scheduleSave(); });
     const lf = (label, el) => h('label', { class: 'f' }, h('span', {}, label), el);
-    return h('div', { class: 'xitem view' }, thumb(v.id, 'thumb', 220),
-      h('div', {}, h('span', { class: 'kindtag' }, v.view_kind === 'section' ? 'cut section' : v.view_kind === 'zoom' ? 'zoomed view' : 'detail view'),
-        h('span', { class: 'meta' }, `${img.name || ''}${v.parent_conf === 'guess' ? '  \u00b7  my guess for the plot: please check' : ''}`),
-        h('div', { class: 'grid' }, lf('Kind of picture', kind), lf('Belongs to (the slide it is placed on)', par)),
-        lf('Label on the slide', lab)),
+    return h('div', { class: 'xitem view' }, thumb(v.id, 'thumb', 260),
+      h('div', {},
+        h('div', { class: 'head-row' },
+          h('span', { class: 'kindtag' }, v.view_kind === 'section' ? 'cut section' : v.view_kind === 'zoom' ? 'zoomed view' : 'detail view'),
+          h('span', { class: 'fn-title' }, img.name || ''),
+          v.parent_conf === 'guess' ? h('span', { class: 'meta' }, '\u00b7  my guess for the plot: please check') : null),
+        h('div', { class: 'grid view-grid' },
+          lf('1. Kind of picture', kind),
+          lf('2. Belongs to (which slide it goes on)', par),
+          lf('3. Label on the slide', lab))),
       h('div', { class: 'acts' }, h('button', { type: 'button', onclick: () => { if (img.id !== undefined) { img.role = 'unused'; img.case = null; regroup(); } } }, 'Remove')));
   }));
 }

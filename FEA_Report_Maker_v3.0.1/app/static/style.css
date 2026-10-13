@@ -368,9 +368,15 @@ button.primary.big { padding: 14px 30px; font-size: 17px; }
 .up-count { color: var(--grey); font-size: 14px; }
 
 /* ───────── v3: further results, zoomed / section pictures, order of the load cases ───────── */
-.xitem.more, .xitem.view { background: #fbfdff; }
-.xitem .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 14px; margin: 8px 0; }
-.xitem .sub-sel { font-size: 13.5px; padding: 6px 8px; }
+.xitem.more, .xitem.view { background: #fbfdff; width: 100%; max-width: 100%; display: grid; grid-template-columns: 140px minmax(0, 1fr) auto; gap: 16px; align-items: start; padding: 14px 16px; }
+.xitem.more .thumb, .xitem.view .thumb { width: 140px; height: 96px; object-fit: contain; background: #fff; }
+.xitem .grid { grid-template-columns: repeat(2, minmax(200px, 1fr)); gap: 12px 18px; margin: 10px 0 4px; width: 100%; }
+.xitem.view .grid.view-grid { grid-template-columns: minmax(170px, 1fr) minmax(240px, 1.5fr) minmax(180px, 1.1fr); align-items: end; }
+.xitem .f { width: 100%; min-width: 0; }
+.xitem .f > span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.xitem .sub-sel, .xitem input[type=text] { font-size: 14px; padding: 7px 10px; width: 100%; min-width: 0; }
+.xitem .head-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 4px; }
+.xitem .head-row .fn-title { font-weight: 700; color: var(--navy); font-size: 14px; }
 .verdict-line.oktxt { color: var(--ok); font-weight: 600; } .verdict-line.badtxt { color: var(--bad); font-weight: 600; }
 .xitem.more .evid, .xitem.more figure.evid { margin-top: 8px; }
 .card.order { border-color: #e2a600; background: #fffdf5; }
@@ -378,7 +384,7 @@ button.primary.big { padding: 14px 30px; font-size: 17px; }
 .ogp { display: flex; gap: 6px; flex-wrap: wrap; max-width: 330px; }
 .ogp .thumb { width: 74px; height: 52px; }
 .ogt small { display: block; color: var(--grey); font-size: 12.5px; }
-@media (max-width: 860px) { .up-setup { grid-template-columns: 1fr; } .og { grid-template-columns: 1fr; } .xitem .grid { grid-template-columns: 1fr; } }
+@media (max-width: 860px) { .up-setup { grid-template-columns: 1fr; } .og { grid-template-columns: 1fr; } .xitem .grid, .xitem.view .grid.view-grid { grid-template-columns: 1fr; } .xitem.more, .xitem.view { grid-template-columns: 110px minmax(0, 1fr); } }
 
 /* ───────── v3: the preview changes only when asked ───────── */
 .pv-status.warn { background: var(--warn-bg); color: var(--warn); } .pv-status.warn i { background: #d99100; }
