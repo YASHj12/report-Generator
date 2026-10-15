@@ -1,111 +1,176 @@
 <!doctype html>
-<html lang="en" data-theme="light">
+<html lang="en" data-theme="dark">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>FEA Report Maker — Precision Engineering Workbench</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='4' fill='%23161615'/%3E%3Crect x='5' y='5' width='8' height='8' fill='%23E04F16'/%3E%3Cpath d='M7 24l6-9 4 5 5-9 4 13z' fill='%23F3F1EC'/%3E%3C/svg%3E">
+<title>FEA Report Maker — CAE Verification &amp; Deck Studio</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='5' fill='%23111317'/%3E%3Crect x='4' y='4' width='9' height='9' rx='1.5' fill='%23E04F16'/%3E%3Cpath d='M6 25l6-10 4 5 5-10 5 15z' fill='%23F3F1EC'/%3E%3C/svg%3E">
 <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
 
-<!-- Subtle Blueprint Drafting Grid & Live Cursor Coordinate Readout -->
+<!-- Precision CAD Blueprint Crosshair & Stress-Wave Telemetry Backdrop -->
 <div class="studio-bg" id="studio-bg" aria-hidden="true">
   <canvas id="fea-mesh-canvas"></canvas>
 </div>
 
-<!-- Top Precision Instrument Header -->
+<!-- Top CAE Studio Command Bar -->
 <header class="top">
   <div class="top-in">
     <div class="brand">
       <div class="brand-mark" aria-hidden="true">
+        <span class="bm-ring"></span>
         <span class="bm-dot"></span>
-        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2">
-          <rect x="3" y="3" width="18" height="18" rx="2"/>
-          <path d="M3 9h18M9 21V9"/>
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.1">
+          <polygon points="12 2 21 7 21 17 12 22 3 17 3 7 12 2"/>
+          <line x1="12" y1="22" x2="12" y2="12"/>
+          <polyline points="21 7 12 12 3 7"/>
         </svg>
       </div>
       <div class="brand-text">
         <div class="brand-row">
-          <strong>FEA REPORT MAKER</strong>
-          <span class="sys-tag">SYS // 3.0.1</span>
+          <strong>FEA REPORT STUDIO</strong>
+          <span class="sys-tag">CAE // REV 3.0.1</span>
         </div>
-        <span>ANSYS Mechanical &rarr; Structural PowerPoint Workbench</span>
+        <span>ANSYS Mechanical Post-Processor &amp; Executive PowerPoint Workbench</span>
       </div>
     </div>
 
     <!-- Exact <ol id="steps"><li data-stage="..."> structure required by app.js setStep() -->
     <ol class="steps" id="steps" aria-label="Workflow stages">
-      <li data-stage="upload" class="on"><i>01</i><span>Upload</span></li>
-      <li data-stage="review"><i>02</i><span>Review &amp; Preview</span></li>
-      <li data-stage="done"><i>03</i><span>Export</span></li>
+      <li data-stage="upload" class="on"><i>01</i><span>Ingest &amp; Classify</span></li>
+      <li data-stage="review"><i>02</i><span>FEA Studio &amp; Deck</span></li>
+      <li data-stage="done"><i>03</i><span>Signed Off &amp; Exported</span></li>
     </ol>
 
     <div class="top-actions">
-      <div class="coord-readout" id="coord-readout" aria-hidden="true">XY // 0000 : 0000</div>
-      <button id="btn-theme-toggle" class="top-btn theme-btn" type="button" title="Switch between Swiss Drafting Paper (Light) and Carbon Darkroom (Dark)">
+      <div class="coord-readout" id="coord-readout" aria-hidden="true">CAD // 0000 : 0000</div>
+      <button id="btn-vault-toggle" class="top-btn" type="button" title="Toggle Recent Saved Files Vault panel">
+        <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="15" y1="3" x2="15" y2="21"/></svg>
+        <span class="vault-lbl">Vault</span>
+      </button>
+      <button id="btn-theme-toggle" class="top-btn theme-btn" type="button" title="Switch between Anodized Carbon Darkroom and Swiss Drafting Paper Light mode">
         <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
-        <span class="theme-lbl">Carbon Dark</span>
+        <span class="theme-lbl">Paper Light</span>
       </button>
       <button id="btn-top-save" class="top-btn save-btn" type="button" title="Save current report (partially or fully) to Recent Files (Ctrl+S)">
         <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
         <span>Save File</span>
       </button>
-      <button id="btn-new-report" class="top-btn" type="button" title="Start a new report">+ New Report</button>
+      <button id="btn-new-report" class="top-btn" type="button" title="Start a new report">+ New Job</button>
     </div>
 
     <div class="chips" id="chips"></div>
   </div>
 </header>
 
-<!-- Main Engineering Workbench + Right Session Vault -->
-<div class="page-wrap">
+<!-- 3-Zone CAE Studio Workspace: Left ANSYS Model Tree | Center Workbench | Right Session Vault -->
+<div class="page-wrap" id="page-wrap">
+
+  <!-- ZONE 1: Left ANSYS Mechanical-Style Project Outline Tree -->
+  <aside class="cae-tree-dock" id="cae-tree-dock" aria-label="FEA Project Outline Tree">
+    <div class="tree-card">
+      <div class="tree-head">
+        <span class="tree-kicker">PROJECT OUTLINE</span>
+        <strong id="tree-job-title">ANSYS FEA Job</strong>
+      </div>
+      <div class="tree-body" id="cae-tree-body">
+        <!-- Populated dynamically by studio-motion.js / app.js based on Upload vs Review state -->
+      </div>
+      <div class="tree-foot">
+        <div class="tree-stat-row">
+          <span>ENGINE</span>
+          <b>LOCAL OFFLINE</b>
+        </div>
+        <div class="tree-stat-row">
+          <span>STANDARD</span>
+          <b>ASME / EN / IS</b>
+        </div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ZONE 2: Center Main Engineering & Presentation Workbench -->
   <main id="main">
     <div id="alert" class="alert" hidden></div>
 
-    <!-- ───────── STEP 01 : UPLOAD WORKBENCH ───────── -->
+    <!-- ───────── STEP 01 : CAE SCREENSHOT INGESTION STUDIO ───────── -->
     <section id="s-upload">
       <div id="resume"></div>
 
-      <!-- Compact Precision Instrument Header (No AI Marketing Fluff) -->
-      <div class="instrument-banner">
-        <div class="ib-left">
-          <div class="ib-index">MODULE 01 // SCREENSHOT INGESTION &amp; OCR CLASSIFICATION</div>
-          <h1>Drop your ANSYS screenshots</h1>
-          <p>Any order, any file names. The workbench inspects each picture, extracts boundary conditions and contour legend maximums, and builds the editable PowerPoint deck locally on this machine.</p>
+      <!-- Top Ingestion Console Header + Live 4-Channel Telemetry Counter -->
+      <div class="ingestion-console">
+        <div class="ic-top">
+          <div class="ic-copy">
+            <div class="ib-index">STAGE 01 // ANSYS SCREENSHOT INGESTION &amp; OPTICAL PARSER</div>
+            <h1>Ingest ANSYS Mechanical Screenshots</h1>
+            <p>Drop screenshots in any order. The optical engine extracts the Workbench project heading from your Setup view, reads von-Mises &amp; deformation legend peaks, and groups active load cases automatically.</p>
+          </div>
+          <div class="ic-actions">
+            <button id="btn-example" class="secondary" type="button" hidden>
+              <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+              Load 9 Example Screenshots
+            </button>
+          </div>
         </div>
-        <div class="ib-right">
-          <button id="btn-example" class="secondary" type="button" hidden>
-            <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-            Load 9 Example Pictures
-          </button>
+
+        <!-- Live 4-Channel Screenshot Ingestion Telemetry Strip -->
+        <div class="ic-telemetry" id="up-telemetry-bar">
+          <div class="ic-chan" data-chan="total">
+            <span class="ch-code">CH-01 // QUEUED FILES</span>
+            <strong class="ch-val" id="ch-val-total">0</strong>
+            <small class="ch-sub">PNG / JPG / BMP / TIFF</small>
+          </div>
+          <div class="ic-chan" data-chan="mode">
+            <span class="ch-code">CH-02 // INGEST MODE</span>
+            <strong class="ch-val" id="ch-val-mode">BULK AUTO</strong>
+            <small class="ch-sub">Auto-sort by OCR &amp; filename</small>
+          </div>
+          <div class="ic-chan" data-chan="cases">
+            <span class="ch-code">CH-03 // TARGET CASES</span>
+            <strong class="ch-val" id="ch-val-cases">AUTO-DETECT</strong>
+            <small class="ch-sub">Unuploaded cases excluded</small>
+          </div>
+          <div class="ic-chan" data-chan="dups">
+            <span class="ch-code">CH-04 // SLIDE PAIRING</span>
+            <strong class="ch-val" id="ch-val-dups">READY</strong>
+            <small class="ch-sub">Cut &amp; zoomed view detector</small>
+          </div>
         </div>
       </div>
 
-      <!-- Step 1A: Job Configuration Instrument Bar -->
-      <section class="card up-setup" id="up-setup">
-        <div class="up-q">
-          <label for="up-ncases"><span class="q-num">01</span> <b>How many load cases does this job have?</b></label>
-          <select id="up-ncases" aria-describedby="up-ncases-help"></select>
-          <small id="up-ncases-help"></small>
-        </div>
-        <div class="up-q">
-          <b id="up-mode-label"><span class="q-num">02</span> How do you want to add the pictures?</b>
-          <!-- Exact data-mode="bulk" and data-mode="cases" attributes required by upload.js -->
-          <div class="seg" id="up-mode" role="group" aria-labelledby="up-mode-label">
-            <button type="button" data-mode="bulk" class="on" aria-pressed="true">All together (bulk)</button>
-            <button type="button" data-mode="cases" aria-pressed="false">Case by case</button>
+      <!-- Job Configuration Matrix + Viewport Drop Pad -->
+      <div class="upload-workbench-split">
+        <section class="card up-setup" id="up-setup">
+          <div class="up-q">
+            <label for="up-ncases"><span class="q-num">01</span> <b>How many load cases does this job have?</b></label>
+            <select id="up-ncases" aria-describedby="up-ncases-help"></select>
+            <small id="up-ncases-help"></small>
           </div>
-          <small id="up-mode-help"></small>
+          <div class="up-q">
+            <b id="up-mode-label"><span class="q-num">02</span> How do you want to add the pictures?</b>
+            <!-- Exact data-mode="bulk" and data-mode="cases" attributes required by upload.js -->
+            <div class="seg" id="up-mode" role="group" aria-labelledby="up-mode-label">
+              <button type="button" data-mode="bulk" class="on" aria-pressed="true">All together (bulk)</button>
+              <button type="button" data-mode="cases" aria-pressed="false">Case by case</button>
+            </div>
+            <small id="up-mode-help"></small>
+          </div>
+        </section>
+
+        <!-- CAD Viewport Drop Matrix -->
+        <div class="viewport-drop-shell">
+          <div class="viewport-bar">
+            <span class="vp-tag">CAD DROP VIEWPORT // DRAG &amp; DROP OR CLICK TO BROWSE</span>
+            <span class="vp-coords">SUPPORTED: .PNG .JPG .BMP .TIF .WEBP</span>
+          </div>
+          <div id="up-zones" class="up-zones one"></div>
         </div>
-      </section>
+      </div>
 
-      <!-- Step 1B: Full-Width Precision CAD Drop Matrix -->
-      <div id="up-zones" class="up-zones one"></div>
-
-      <!-- Step 1C: Primary Launch & Session Action Bar (Always accessible right below drop zones) -->
+      <!-- Primary Execution Console Bar -->
       <div class="up-go">
-        <button id="up-read" class="primary big" type="button" disabled>Read the pictures &rarr;</button>
+        <button id="up-read" class="primary big" type="button" disabled>Read the pictures &amp; Build Draft &rarr;</button>
         <button id="up-save" class="secondary big save-action" type="button" disabled title="Save these uploaded pictures to Recent Files for later">
           <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
           Save File
@@ -114,43 +179,51 @@
         <span id="up-count" class="up-count"></span>
       </div>
 
-      <!-- Step 1D: Uploaded Pictures Inspector Table -->
+      <!-- Uploaded Pictures Inspector Table (with Visual Contact Sheet Toggle) -->
       <section class="card" id="up-listcard" hidden>
-        <h2><span class="num">03</span>Uploaded Pictures &amp; Category Assignment</h2>
-        <p class="sub">Optional: give a picture a <b>name</b> and say <b>what it is</b>. If multiple pictures share the same category and load case, choose right in the table whether they go on the <b>same slide</b> or <b>separate slides</b> as a cut section or zoomed section.</p>
+        <div class="listcard-head">
+          <div>
+            <h2><span class="num">03</span>Queued Screenshots &amp; Category Inspector</h2>
+            <p class="sub">Optional: give any screenshot a custom <b>name</b> or assign its <b>category</b>. When two pictures share the same load case and category, choose directly in the row whether to place them on the <b>same slide</b> or <b>separate slides</b> as a cut section or zoomed section.</p>
+          </div>
+          <div class="view-mode-switch" id="up-view-switch">
+            <button type="button" class="vms-btn on" data-vmode="table">Table View</button>
+            <button type="button" class="vms-btn" data-vmode="grid">Contact Sheet Grid</button>
+          </div>
+        </div>
         <div class="scroll" id="up-list"></div>
       </section>
 
-      <!-- Compact Technical Reference Strip -->
+      <!-- 3-Pillar FEA Methodology Reference -->
       <div class="how">
         <div>
-          <i>01</i>
-          <b>Optical Legend &amp; Setup Reader</b>
-          <p>Identifies Geometry, Mesh, Setup, Deformation, Stress, and Detail views; extracts the ANSYS project heading from the Setup screenshot and reads Max values from legends.</p>
+          <i>GATE 01</i>
+          <b>Setup Heading &amp; Legend OCR</b>
+          <p>Reads the first bold line of your ANSYS Setup screenshot for the Setup slide heading, extracts A/B/C boundary conditions, and double-reads colourbar maximums.</p>
         </div>
         <div>
-          <i>02</i>
-          <b>Engineering Verification</b>
-          <p>Highlights required engineering inputs (yield strength, governing part, client metadata) and flags stress singularities or reaction-force imbalances.</p>
+          <i>GATE 02</i>
+          <b>Design Margin &amp; Singularity Guard</b>
+          <p>Computes allowable stresses from governing material yield &amp; FOS, flags stress singularities (&gt; yield), and checks reaction-force equilibrium.</p>
         </div>
         <div>
-          <i>03</i>
-          <b>Interactive Slide &amp; Deck Studio</b>
-          <p>Live 16:9 PowerPoint renderer with drag-and-drop image repositioning, corner-handle resizing, caption editing, and cross-slide image movement.</p>
+          <i>GATE 03</i>
+          <b>Interactive PowerPoint Studio</b>
+          <p>Renders the real 16:9 PowerPoint deck in-browser with drag-to-move, 8-handle resize, caption editing, and cross-slide picture transfer.</p>
         </div>
       </div>
 
       <p class="priv">
         <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path d="M7 11V8a5 5 0 0110 0v3M6 11h12v9H6z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
-        LOCAL WORKBENCH EXECUTION // 100% OFFLINE — NO FILES LEAVE THIS MACHINE.
+        AIR-GAPPED LOCAL EXECUTION // 100% OFFLINE — ZERO CLOUD TRANSFER.
       </p>
     </section>
 
-    <!-- ───────── STEP 02 : REVIEW & LIVE DECK STUDIO (built by app.js) ───────── -->
+    <!-- ───────── STEP 02 : FEA VERIFICATION & LIVE DECK STUDIO (built by app.js) ───────── -->
     <section id="s-review" hidden></section>
   </main>
 
-  <!-- ───────── RIGHT DOCK : RECENT SAVED FILES VAULT ───────── -->
+  <!-- ZONE 3: Right Dock — Recent Saved Files Vault -->
   <aside id="recent-aside" class="recent-aside" aria-label="Recent saved files">
     <div class="recent-card">
       <div class="recent-head">
@@ -171,7 +244,7 @@
   </aside>
 </div>
 
-<!-- Bottom Command Bar in Step 2 -->
+<!-- Sticky Bottom Studio Command Bar in Step 2 -->
 <footer id="bar" class="bar" hidden>
   <div class="bar-in">
     <div id="bar-msg" class="bar-msg"></div>

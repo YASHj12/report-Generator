@@ -530,6 +530,171 @@ function readSummary(i) {
   return bits.join('  \u00b7  ');
 }
 
+const MATERIAL_PRESETS = [
+  { label: 'IS 2062 E250 (Sy 250)', material: 'IS 2062 Gr. E250 (Fe410W)', E: '200000', nu: '0.3', rho: '7.85E-9', yield: '250' },
+  { label: 'IS 2062 E350 (Sy 350)', material: 'IS 2062 Gr. E350 (Fe490)',  E: '200000', nu: '0.3', rho: '7.85E-9', yield: '350' },
+  { label: 'ASTM A36 (Sy 250)',     material: 'ASTM A36 Structural Steel', E: '200000', nu: '0.26', rho: '7.85E-9', yield: '250' },
+  { label: 'EN S355JR (Sy 355)',    material: 'EN 10025 S355JR',           E: '210000', nu: '0.3', rho: '7.85E-9', yield: '355' },
+  { label: 'SS 304 (Sy 215)',       material: 'AISI 304 Stainless Steel',  E: '193000', nu: '0.29', rho: '8.00E-9', yield: '215' },
+  { label: 'SS 316L (Sy 205)',      material: 'AISI 316L Stainless Steel', E: '193000', nu: '0.29', rho: '8.00E-9', yield: '205' },
+  { label: 'AISI 4140 (Sy 655)',    material: 'AISI 4140 Alloy Steel QT',  E: '205000', nu: '0.29', rho: '7.85E-9', yield: '655' },
+  { label: 'Al 6061-T6 (Sy 276)',   material: 'Aluminium 6061-T6',         E: '68900',  nu: '0.33', rho: '2.70E-9', yield: '276' },
+];
+
+function applyMaterialPreset(preset) {
+  const row = govRow() || S.mat.rows[0];
+  if (!row || !preset) return;
+  row.material = preset.material;
+  row.E = preset.E;
+  row.nu = preset.nu;
+  row.rho = preset.rho;
+  row.yield = preset.yield;
+  renderMaterialTable();
+  refreshAllowable();
+  updateNeeds();
+}
+
+function feaCriticalityHud() {
+  return h('section', { class: 'card fea-hud', id: 'fea-criticality-hud' });
+}
+
+function renderFeaHud() {
+  const hud = $('#fea-criticality-hud');
+  if (!hud) return;
+  const row = govRow() || {};
+  const sy = num(row.yield);
+  const allow = govAllow();
+  const fosReq = S.fos || 1.3;
+  const activeCases = S.cases.filter(caseHasFiles);
+
+  let govCase = null, maxStress = null, maxDef = null, maxDefCase = null;
+  for (const c of activeCases) {
+    const sm = num(c.stress_max);
+    const dm = num(c.def_max);
+    if (sm !== null && (maxStress === null || sm > maxStress)) {
+      maxStress = sm;
+      govCase = c;
+    }
+    if (dm !== null && (maxDef === null || dm > maxDef)) {
+      maxDef = dm;
+      maxDefCase = c;
+    }
+  }
+
+  const fosActual = (sy && maxStress && maxStress > 0) ? (sy / maxStress) : null;
+  const maxUtil = (allow && maxStress !== null && allow > 0) ? (maxStress / allow) * 100 : null;
+  const marginPct = maxUtil !== null ? (100 - maxUtil) : null;
+
+  // 5-Gate TPI / Chief Engineer Verification Gates
+  const gate1Ok = Boolean(sy && sy > 0 && String(row.material || '').trim());
+  const skMax = num(S.meshStats && S.meshStats.skew_max);
+  const oqMin = num(S.meshStats && S.meshStats.oq_min);
+  const gate2Ok = S.meshes.length > 0 && (skMax === null || skMax < 0.9) && (oqMin === null || oqMin >= 0.1);
+  const gate3Ok = activeCases.length > 0 && activeCases.every(c => c.bc_items && c.bc_items.length > 0 && c.bc_items.every(t => t.trim() && !/\[[^\]]*\]/.test(t)));
+  const gate4Ok = activeCases.length > 0 && activeCases.every(c => !c.needsBasis && num(c.stress_max) !== null && num(c.def_max) !== null);
+  const gate5Ok = Boolean(String(S.cover.title || '').trim() && String(S.cover.report_no || '').trim() && String(S.cover.client || '').trim() && String(S.short || '').trim());
+
+  const gates = [
+    { code: 'G1', name: 'Material & Yield Basis', ok: gate1Ok, detail: gate1Ok ? `${row.material} (Sy=${sy} MPa, Allow=${allow} MPa)` : 'Enter governing yield stress', cat: 'meta', target: '#mat-wrap' },
+    { code: 'G2', name: 'Mesh & Geometry Gate',   ok: gate2Ok, detail: S.meshes.length ? `${S.meshes.length} mesh view(s)${skMax !== null ? ' · skew ' + skMax : ''}` : 'No mesh screenshot assigned', cat: 'geo', target: '#review-cards-grid' },
+    { code: 'G3', name: 'Boundary Conditions',    ok: gate3Ok, detail: gate3Ok ? `${activeCases.length} case(s) fully specified` : 'Complete [bracketed] BC lines', cat: 'cases', target: '[data-casecard]' },
+    { code: 'G4', name: 'Peak & Singularity Check', ok: gate4Ok, detail: gate4Ok ? (maxUtil !== null && maxUtil > 100 ? 'Peak dispositioned' : 'All peaks verified') : 'Verify peak stress / basis', cat: 'cases', target: '[data-casecard]' },
+    { code: 'G5', name: 'Cover & Sign-Off Meta',  ok: gate5Ok, detail: gate5Ok ? `${S.cover.report_no} · ${S.cover.client}` : 'Complete cover metadata', cat: 'meta', target: '#review-cards-grid' },
+  ];
+  const passedGates = gates.filter(g => g.ok).length;
+
+  const caseBars = activeCases.map(c => {
+    const sm = num(c.stress_max);
+    const dm = num(c.def_max);
+    const util = (allow && sm !== null && allow > 0) ? (sm / allow) * 100 : null;
+    const cFos = (sy && sm && sm > 0) ? (sy / sm) : null;
+    const statusCls = util === null ? 'wait' : util > 100 ? 'bad' : util > 85 ? 'warn' : 'ok';
+    const pctWidth = util === null ? 8 : Math.min(100, Math.max(4, Math.round(util)));
+    return h('div', {
+      class: 'hud-case-row ' + statusCls,
+      title: `Click to jump to Load Case ${c.n}`,
+      onclick: () => {
+        if (S.studioCat !== 'all' && S.studioCat !== 'cases') setStudioCat('cases');
+        const el = $(`[data-casecard="${c.n}"]`);
+        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    },
+      h('div', { class: 'hcr-top' },
+        h('span', { class: 'hcr-id' }, `CASE 0${c.n}`),
+        h('strong', { class: 'hcr-name' }, c.short_name || c.name || `Load Case ${c.n}`),
+        h('span', { class: 'hcr-metrics' },
+          sm !== null ? `\u03c3 = ${sm} MPa` : '\u03c3 = \u2013',
+          '  \u00b7  ',
+          dm !== null ? `\u03b4 = ${dm} mm` : '\u03b4 = \u2013',
+          cFos !== null ? `  \u00b7  FOS = ${cFos.toFixed(2)}` : ''
+        ),
+        h('span', { class: 'hcr-badge ' + statusCls },
+          util === null ? 'AWAITING Sy' : util > 100 ? `EXCEEDS (${util.toFixed(0)}%)` : `PASS (${util.toFixed(0)}%)`)
+      ),
+      h('div', { class: 'hcr-track' },
+        h('div', { class: 'hcr-fill ' + statusCls, style: `width:${pctWidth}%` }),
+        allow ? h('span', { class: 'hcr-limit', title: `Allowable limit: ${allow} MPa` }) : null
+      )
+    );
+  });
+
+  hud.replaceChildren(
+    h('div', { class: 'hud-header' },
+      h('div', {},
+        h('span', { class: 'pane-kicker' }, 'CHIEF ENGINEER TELEMETRY // DESIGN-BY-ANALYSIS CRITICALITY MATRIX'),
+        h('h2', {}, 'Executive FEA Verification & Design Margin HUD')),
+      h('div', { class: 'hud-gate-score ' + (passedGates === 5 ? 'ok' : 'warn') },
+        h('span', {}, 'TPI SIGN-OFF GATES'),
+        h('strong', {}, `${passedGates} / 5 VERIFIED`))
+    ),
+    h('div', { class: 'hud-kpi-strip' },
+      h('div', { class: 'hud-kpi' },
+        h('span', { class: 'kpi-lbl' }, 'GOVERNING PEAK STRESS (\u03c3_max)'),
+        h('strong', { class: 'kpi-val ' + (maxUtil !== null && maxUtil > 100 ? 'bad' : '') },
+          maxStress !== null ? `${maxStress} MPa` : '\u2013 MPa'),
+        h('small', { class: 'kpi-sub' }, govCase ? `Governing: Case ${govCase.n} (${govCase.short_name || govCase.name || ''})` : 'Read from stress legend')),
+      h('div', { class: 'hud-kpi' },
+        h('span', { class: 'kpi-lbl' }, 'ALLOWABLE STRESS (\u03c3_allow = Sy / FOS)'),
+        h('strong', { class: 'kpi-val' }, allow !== null ? `${allow} MPa` : 'Set Yield (Sy)'),
+        h('small', { class: 'kpi-sub' }, sy ? `Sy = ${sy} MPa  \u00b7  Req. FOS = ${fosReq}` : 'Click a material preset or type Sy')),
+      h('div', { class: 'hud-kpi' },
+        h('span', { class: 'kpi-lbl' }, 'ACTUAL SAFETY FACTOR (FOS_act)'),
+        h('strong', { class: 'kpi-val ' + (fosActual !== null ? (fosActual >= fosReq ? 'ok' : 'bad') : '') },
+          fosActual !== null ? `${fosActual.toFixed(2)}x` : '\u2013'),
+        h('small', { class: 'kpi-sub' }, marginPct !== null
+          ? (marginPct >= 0 ? `Design Margin: +${marginPct.toFixed(1)}% reserve` : `Over-stressed by ${Math.abs(marginPct).toFixed(1)}%`)
+          : `Target FOS \u2265 ${fosReq}`)),
+      h('div', { class: 'hud-kpi' },
+        h('span', { class: 'kpi-lbl' }, 'PEAK DEFORMATION (\u03b4_max)'),
+        h('strong', { class: 'kpi-val' }, maxDef !== null ? `${maxDef} mm` : '\u2013 mm'),
+        h('small', { class: 'kpi-sub' }, maxDefCase ? `Occurs in Case ${maxDefCase.n}` : 'Total displacement vector'))
+    ),
+    h('div', { class: 'hud-body-split' },
+      h('div', { class: 'hud-cases-col' },
+        h('div', { class: 'hud-col-title' }, 'LOAD CASE STRESS UTILIZATION (\u03b7 = \u03c3_max / \u03c3_allow) \u2014 CLICK CASE TO INSPECT'),
+        caseBars.length ? h('div', { class: 'hud-cases-list' }, ...caseBars) : h('p', { class: 'hint' }, 'No active load cases.')
+      ),
+      h('div', { class: 'hud-gates-col' },
+        h('div', { class: 'hud-col-title' }, '5-GATE ENGINEERING QA CHECKLIST (CLICK TO JUMP)'),
+        h('div', { class: 'hud-gates-list' }, ...gates.map(g => h('button', {
+          type: 'button',
+          class: 'hud-gate-item ' + (g.ok ? 'ok' : 'todo'),
+          onclick: () => {
+            if (S.studioCat !== 'all' && S.studioCat !== g.cat) setStudioCat(g.cat);
+            const t = $(g.target);
+            if (t) t.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }
+        },
+          h('span', { class: 'hg-code' }, g.code),
+          h('div', { class: 'hg-copy' }, h('b', {}, g.name), h('small', {}, g.detail)),
+          h('span', { class: 'hg-status' }, g.ok ? '\u2713 PASS' : 'OPEN \u2192')
+        )))
+      )
+    )
+  );
+  if (typeof window.syncCaeTree === 'function') window.syncCaeTree();
+}
+
 function setStudioCat(cat) {
   S.studioCat = cat || 'all';
   $$('#s-review [data-cat-btn]').forEach(btn => {
@@ -627,12 +792,13 @@ function renderReview() {
     id: 'review-workbench'
   }, previewCard(), inspector);
 
+  const hud = feaCriticalityHud();
   const dl = h('div', { hidden: true });
   for (const k of HIST_KEYS) dl.append(h('datalist', { id: 'dl-' + k }, hist(k).map(v => h('option', { value: v }))));
 
-  root.replaceChildren(...[topBento, ord, workbench, dl].filter(Boolean));
+  root.replaceChildren(...[hud, topBento, ord, workbench, dl].filter(Boolean));
   setStudioCat(S.studioCat);
-  renderChecks(); renderVerdicts(); renderHint(); refreshAllowable(); renderLayoutCard(); renderBasisBoxes(); refreshMoreStatus(); updateNeeds(); renderPreview();
+  renderChecks(); renderVerdicts(); renderHint(); refreshAllowable(); renderLayoutCard(); renderBasisBoxes(); refreshMoreStatus(); updateNeeds(); renderPreview(); renderFeaHud();
 }
 
 function introCard() {
@@ -812,7 +978,17 @@ function materialCard() {
   utilEl.addEventListener('change', () => { S.showUtil = utilEl.checked; scheduleDerive(); scheduleSave(); });
   const unitsEl = h('input', { type: 'text', value: S.units, 'data-need': 'req', 'data-label': 'Units line', 'aria-label': 'Units line' });
   unitsEl.addEventListener('input', () => { S.units = unitsEl.value; updateNeeds(); });
+  const presetBar = h('div', { class: 'mat-preset-bar' },
+    h('span', { class: 'mp-lbl' }, 'ENGINEERING MATERIAL LIBRARY (1-CLICK FILL):'),
+    ...MATERIAL_PRESETS.map(p => h('button', {
+      type: 'button',
+      class: 'mp-btn',
+      title: `Fill ${p.material} (E=${p.E} MPa, nu=${p.nu}, Sy=${p.yield} MPa)`,
+      onclick: () => applyMaterialPreset(p)
+    }, p.label))
+  );
   const c = card('3', 'Material & acceptance criteria', 'Allowable stress = Yield stress \u00f7 FOS, rounded down (the formula on the material page of your template).',
+    presetBar,
     wrap,
     h('div', { class: 'rowtools' },
       h('button', { class: 'link', type: 'button', onclick: addMaterialRow }, '+ Add another material'),
@@ -865,7 +1041,7 @@ function addMaterialRow() {
 
 function refreshAllowable() {
   $$('[data-allow]').forEach(td => { const a = allowOf(S.mat.rows[+td.dataset.allow]); td.textContent = a === null ? '\u2013' : a; });
-  renderHint(); scheduleDerive();
+  renderHint(); renderFeaHud(); scheduleDerive();
 }
 
 function renderHint() {
@@ -1368,6 +1544,7 @@ function updateNeeds() {
       h('button', { class: 'link', type: 'button', onclick: gotoNeed }, 'Show me'));
   }
   renderTodo();
+  renderFeaHud();
   scheduleSave();
 }
 function gotoNeed() {
