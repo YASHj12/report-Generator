@@ -550,7 +550,7 @@ function toggleStudioSplit() {
   const btn = $('#pv-split-btn');
   if (btn) {
     btn.classList.toggle('active-split', !!S.studioSplit);
-    btn.textContent = S.studioSplit ? '\ud83c\udfac Theater Top View' : '\u25eb Split Side-by-Side';
+    btn.textContent = S.studioSplit ? 'STAGE VIEW // FULL WIDTH' : 'SPLIT VIEW // SIDE-BY-SIDE';
   }
   setTimeout(() => renderPreview(), 60);
 }
@@ -584,11 +584,11 @@ function renderReview() {
       })()];
 
   const catTabs = [
-    ['all',   '\u2726 All Sections (Bento Grid)'],
-    ['pics',  `\ud83d\uddbc Pictures & Layout (${S.images.length})`],
-    ['meta',  '\ud83d\udccb Cover, Material & Scope'],
-    ['geo',   '\ud83e\uddca Geometry & Mesh'],
-    ['cases', `\u26a1 Load Cases (${S.cases.length})`],
+    ['all',   '00 // ALL SECTIONS'],
+    ['pics',  `01 // PICTURES & LAYOUT [${S.images.length}]`],
+    ['meta',  '02 // COVER, MATERIAL & SCOPE'],
+    ['geo',   '03 // GEOMETRY & MESH'],
+    ['cases', `04 // LOAD CASES [${S.cases.length}]`],
   ];
 
   const caseJumpPills = S.cases.length > 1 ? h('div', { class: 'case-jump-pills' },
@@ -1458,7 +1458,7 @@ function previewCard() {
         h('h2', {}, 'Report Slide Preview')),
       h('span', { class: 'pv-status busy', id: 'pv-status' }, h('i'), h('span', { id: 'pv-status-text' }, 'Preparing ...')),
       h('button', { class: 'secondary' + (S.studioSplit ? ' active-split' : ''), type: 'button', id: 'pv-split-btn', onclick: toggleStudioSplit, title: 'Switch between Full-Width Theater Stage and Side-by-Side Split Studio' },
-        S.studioSplit ? '\ud83c\udfac Theater Top View' : '\u25eb Split Side-by-Side'),
+        S.studioSplit ? 'STAGE VIEW // FULL WIDTH' : 'SPLIT VIEW // SIDE-BY-SIDE'),
       h('button', { class: 'secondary' + (S.pvEdit ? ' active-edit' : ''), type: 'button', id: 'pv-edit-btn', onclick: togglePvEdit },
         S.pvEdit ? '\u2713 Done editing slide' : '\u270e Edit slide & images'),
       h('button', { class: 'secondary', type: 'button', id: 'pv-refresh', onclick: () => previewNow().catch(() => {}) }, ico('refresh'), 'Update preview'),

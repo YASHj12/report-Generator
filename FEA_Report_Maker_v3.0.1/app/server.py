@@ -1842,6 +1842,7 @@ def api_save_upload():
             "type": str(m.get("type") or "auto"),
             "kind": str(m.get("kind") or ""),
             "view": str(m.get("view") or ""),
+            "dup_mode": str(m.get("dup_mode") or ""),
             "case": m.get("case") if m.get("case") is not None else "",
         })
     if not saved_items:
