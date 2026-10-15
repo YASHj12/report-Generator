@@ -45,10 +45,10 @@ MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "June", "July", "Aug", "Sept", "Oct
 LOAD_WORDS = {"pressure", "moment", "force", "gravity", "load", "self", "weight", "temperature", "torque"}
 
 MESH_EDGE_THRESHOLD = 0.075       # fraction of edge pixels. Measured on 2 jobs: plain geometry 0.004-0.021, mesh 0.227-0.411
-HEADER_BOX = (0.0, 0.0, 0.46, 0.215)      # where ANSYS prints the title block (fractions of the picture)
+HEADER_BOX = (0.0, 0.0, 0.68, 0.215)      # where ANSYS prints the title block (fractions of the picture)
 LEGEND_BOX = (0.0, 0.12, 0.27, 0.62)      # colour legend of a result plot (the red "Max" callout on the model is outside)
 BC_BOX = (0.028, 0.07, 0.36, 0.46)        # load / support legend of the setup picture
-HEADER_PX, LEGEND_PX, BC_PX = (0, 0, 520, 170), (0, 66, 270, 340), (15, 38, 355, 253)   # same regions in pixels of a ~1000 x 550 screenshot
+HEADER_PX, LEGEND_PX, BC_PX = (0, 0, 780, 170), (0, 66, 270, 340), (15, 38, 355, 253)   # same regions in pixels of a ~1000 x 550 screenshot
 ANALYSIS_MAX_SIDE = 3000                  # bigger screenshots are scaled down for analysis only (memory)
 CASE_ROLES = {"bc", "deformation", "stress", "x_bc", "x_deformation", "x_stress", "x_other", "view"}
 MAIN_SLOTS = (("bc", "bc_id"), ("deformation", "def_id"), ("stress", "stress_id"))
@@ -243,7 +243,7 @@ def parse_header(lines):
     out = {"letter": None, "model": None, "role": None, "unit": None, "has_header": False, "is_result": False,
            "result_kind": "", "kind": "", "kind_label": "", "scope": ""}
     for l in lines[:3]:
-        m = re.match(r"^\W*([A-Z])\s*[:;]\s*(\S.*)$", l)
+        m = re.match(r"^\W*([A-Z])\s*[:;.\-]\s*(\S.*)$", l)
         if m:
             out["letter"], out["model"] = m.group(1), re.sub(r"(\s+[a-z]{1,2})+$", "", m.group(2).strip())
             out["has_header"] = True
@@ -262,6 +262,11 @@ def parse_header(lines):
     src = f"{type_txt} | {name_line}".lower()
     other = re.search(r"deformation|stress|strain|safety factor|displacement|reaction|energy|fatigue|damage|shear|principal|intensity", src)
     static = re.search(r"static structural|transient structural|steady-state|modal|harmonic|buckling", " ".join(lines[:3]).lower())
+    if not out["model"] and lines and (static or out["is_result"]):
+        l0 = re.sub(r"^\W*([A-Z]\s*[:;.\-]\s*)?", "", lines[0]).strip()
+        if l0 and not re.search(r"^(static structural|transient structural|steady-state|modal|harmonic|buckling|type\b|unit\b|time\b)", l0, re.I):
+            out["model"] = re.sub(r"(\s+[a-z]{1,2})+$", "", l0)
+            out["has_header"] = True
     if out["is_result"] or (other and not static):
         kid, klabel = classify_kind(type_txt) if type_txt else ("", "")
         if not kid:
@@ -445,8 +450,45 @@ def bc_sentence(legend: str):
     return f"[{legend} - please describe]", True
 
 
-def case_headline(legend_lines):
-    """('Pressure Only', '(Self Weight + Pressure)') built from the LOADS found in the BC legend."""
+def parse_workbench_model(model: str) -> dict:
+    """Parse the ANSYS Workbench file/system name from the first bold line of the screenshot
+    (e.g. '6203_KCP_MLD_Blade_PRESSURE', '6203_KCP_MLD_Blade_PRESSURE+Moment', 'Damper_Blade_Wind_Load', 'Duct_Structure')."""
+    raw = re.sub(r"^\W*([A-Z]\s*[:;.\-]\s*)?", "", (model or "").strip())
+    raw = re.sub(r"(\s+[a-z]{1,2})+$", "", raw).strip()
+    loads = []
+    self_weight = False
+    for part in re.split(r"[_\s+\-/]+", raw):
+        tl = part.lower()
+        if tl in ("gravity", "self", "weight"):
+            self_weight = True
+        elif tl == "pressure" and "Pressure" not in loads:
+            loads.append("Pressure")
+        elif tl in ("moment", "torque") and "Moment" not in loads:
+            loads.append("Moment")
+        elif tl == "force" and "Force" not in loads:
+            loads.append("Force")
+        elif tl in ("temperature", "thermal") and "Temperature" not in loads:
+            loads.append("Temperature")
+        elif tl == "wind" and "Wind Load" not in loads:
+            loads.append("Wind Load")
+        elif tl == "seismic" and "Seismic Load" not in loads:
+            loads.append("Seismic Load")
+    skip = LOAD_WORDS | {"thermal", "wind", "seismic", "static", "structural", "transient", "modal", "analysis", "fea"}
+    toks = [t for t in re.split(r"[_\s]+", raw)
+            if t and "+" not in t and t.lower() not in skip and not re.match(r"^(?:case|lc)\d*$", t, re.I)]
+    job = client = obj = ""
+    if len(toks) >= 3 and toks[0].isdigit():
+        job, client, obj = toks[0], toks[1], " ".join(toks[2:])
+    elif len(toks) == 2 and toks[0].isdigit():
+        job, obj = toks[0], toks[1]
+    elif toks:
+        obj = " ".join(toks)
+    return {"raw": raw, "job": job, "client": client, "obj": obj, "loads": loads, "self_weight": self_weight}
+
+
+def case_headline(legend_lines, model=None):
+    """Headline and subtitle for the setup slide built from the setup screenshot's first bold line (ANSYS Workbench model name)
+    and the LOADS found in the BC legend."""
     loads, self_weight = [], False
     for l in legend_lines:
         t = l.lower()
@@ -460,11 +502,22 @@ def case_headline(legend_lines):
             loads.append("Force")
         elif "temperature" in t:
             loads.append("Temperature")
+    pm = parse_workbench_model(model) if model else {"obj": "", "loads": [], "self_weight": False}
+    for ld in pm["loads"]:
+        if ld not in loads:
+            loads.append(ld)
+    self_weight = self_weight or pm["self_weight"]
     loads = list(dict.fromkeys(loads))
-    if not loads:
-        return "", ""
-    name = f"{loads[0]} Only" if len(loads) == 1 else " + ".join(loads)
-    return name, "(" + " + ".join((["Self Weight"] if self_weight else []) + loads) + ")"
+    load_name = (f"{loads[0]} Only" if len(loads) == 1 else " + ".join(loads)) if loads else ""
+    sub = ("(" + " + ".join((["Self Weight"] if self_weight else []) + loads) + ")") if loads else ""
+    obj = pm["obj"]
+    if obj and load_name:
+        name = f"{obj} \u2013 {load_name}"
+    elif obj:
+        name = obj
+    else:
+        name = load_name
+    return name, sub
 
 
 
@@ -511,6 +564,16 @@ def extract_role_data(img: Image.Image, info: dict, role: str, k_an: float = 1.0
         if base == "stress":
             info["red_px"] = red_pixels(img)
     elif base == "bc":
+        if not info.get("model"):
+            for hbox in candidate_boxes(img, HEADER_BOX, HEADER_PX):
+                hdr_lines = _lines(ocr_region(img, *hbox))
+                h = parse_header(hdr_lines)
+                if h.get("model") or h.get("has_header"):
+                    info["model"] = h.get("model") or info.get("model")
+                    info["letter"] = h.get("letter") or info.get("letter")
+                    if not info.get("header"):
+                        info["header"] = hdr_lines[:5]
+                    break
         legend, bc_box = [], BC_BOX
         for box in candidate_boxes(img, BC_BOX, BC_PX):               # big pictures: keep the region that reads the MOST lines
             lines = parse_bc_legend(ocr_region(img, *box, psm=6))
@@ -518,7 +581,7 @@ def extract_role_data(img: Image.Image, info: dict, role: str, k_an: float = 1.0
                 legend, bc_box = lines, box
         drafts = [bc_sentence(l) for l in legend]
         info.update(bc_legend=legend, bc_draft=[dict(legend=l, text=t, needs_input=n) for l, (t, n) in zip(legend, drafts)],
-                    headline=list(case_headline(legend)), gravity=gravity_of(legend))
+                    headline=list(case_headline(legend, info.get("model"))), gravity=gravity_of(legend))
         px, crop = measure_legend(img, bc_box, "bc")
         if px:
             info["legend_px"] = round(px / k_an, 2)
@@ -692,6 +755,7 @@ def analyze_manual_one(path, idx: int, name=None, why: str = "ocr", hint=None) -
     info = _blank_info(idx, nm, path, W0, H0)
     info.update(role=role or "unknown", confidence="medium" if role else "low", manual=True, label=(hint.get("label") or "").strip(),
                 case_hint=case_no, user_set=bool(hint.get("role") not in (None, "", "auto")),
+                dup_mode=(hint.get("dup_mode") or "").strip(),
                 hash=hashlib.md5(Path(path).read_bytes()).hexdigest())
     if role in ("x_other", "deformation", "stress") and ph["kind"] and not hint.get("kind"):
         info["kind"] = ph["kind"]
@@ -805,12 +869,14 @@ def analyze_one(path, idx: int, name=None, hint=None) -> dict:
             info.update(view_kind=hint.get("view") or ph["view"] or "", parent_kind=hint.get("kind") or ph["kind"],
                         scope_hint=" ".join(ph["scope_words"]))
         info["why"] = "chosen by you"
+    if hint.get("dup_mode"):
+        info["dup_mode"] = str(hint["dup_mode"]).strip()
     extract_role_data(img, info, info["role"], k_an)
     return info
 
 
 def regroup(infos, assignments, settings=None):
-    """Apply the user's corrections {id, role, case, kind?, scope?, view_kind?, parent_id?, label?} and return the new draft."""
+    """Apply the user's corrections {id, role, case, kind?, scope?, view_kind?, parent_id?, label?, dup_mode?} and return the new draft."""
     by_id = {i["id"]: i for i in infos}
     for a in assignments:
         i = by_id.get(a["id"])
@@ -849,6 +915,8 @@ def regroup(infos, assignments, settings=None):
             i["view_kind"] = a["view_kind"]
         if "label" in a and a["label"] is not None:
             i["label"] = str(a["label"]).strip()
+        if "dup_mode" in a and a["dup_mode"] is not None:
+            i["dup_mode"] = str(a["dup_mode"]).strip()
         if "parent_id" in a:
             i["parent_id"] = a["parent_id"]
             i["parent_user"] = a["parent_id"] is not None
@@ -872,8 +940,19 @@ def _common_prefix(a, b):
     return n
 
 
+DUP_HEADING = {
+    "same_section": "Cut section",
+    "sep_section": "Cut section",
+    "same_zoom": "Zoomed section",
+    "sep_zoom": "Zoomed section",
+}
+
+
 def extra_heading(info):
     """Heading of an additional view - stays yellow until the engineer states WHERE (section line, detail position)."""
+    dm = (info.get("dup_mode") or "").strip()
+    if dm in DUP_HEADING:
+        return DUP_HEADING[dm]
     if info["role"] == "x_other" and info.get("result_kind"):
         return info["result_kind"]
     hint = file_hint(info["name"])
@@ -887,9 +966,13 @@ def extra_heading(info):
 def assign_cases(infos):
     """Group pictures into load cases -> list of case drafts (one per case number).
     A case has ONE main setup / deformation / stress picture (the one with the highest Max wins); further plots of the same kind
-    become additional views.  Results of a part ('Equivalent Stress Shaft') and the other result types (shear, principal ...) are
-    separate RESULTS ('more'); colour pictures without legend (zoomed, section) are VIEWS that belong to one of the plots."""
+    are placed on the same slide or on separate slides (as cut section or zoomed section) according to the user's choice in the Pictures tab."""
     by_id = {i["id"]: i for i in infos}
+    raw_cases = sorted({int(i["case"]) for i in infos if i["role"] in CASE_ROLES and i.get("case")})
+    case_map = {old_n: new_n for new_n, old_n in enumerate(raw_cases, 1)}
+    for i in infos:
+        if i["role"] in CASE_ROLES and i.get("case") in case_map:
+            i["case"] = case_map[int(i["case"])]
     groups = {}
     for i in infos:
         if i["role"] in CASE_ROLES and i.get("case"):
@@ -898,32 +981,68 @@ def assign_cases(infos):
     out = []
     for n in sorted(groups):
         g = groups[n]
-        c = {"n": n, "bc_id": None, "def_id": None, "stress_id": None, "extras": [], "demoted": [], "more": [], "views": []}
+        c = {"n": n, "bc_id": None, "def_id": None, "stress_id": None, "bc_extra_same": [], "extras": [], "demoted": [], "more": [], "views": []}
         for base, slot in MAIN_SLOTS:
             mains = [p for p in g.get(base, []) if p["role"] == base]
             if len(mains) > 1:
-                mains.sort(key=lambda p: (not p.get("user_set"), 0.0 if base == "bc" else -(p.get("max") or 0.0), p["id"]))
+                mains.sort(key=lambda p: (
+                    1 if (p.get("dup_mode") or "") in ("same_section", "same_zoom", "sep_section", "sep_zoom") else 0,
+                    not p.get("user_set"),
+                    0.0 if base == "bc" else -(p.get("max") or 0.0),
+                    p["id"],
+                ))
                 for p in mains[1:]:
-                    p["role"] = "x_" + base
                     p["auto_extra"] = True
                     c["demoted"].append((mains[0]["id"], p["id"], base))
+                    dm = (p.get("dup_mode") or "").strip()
+                    if not dm:
+                        fh = file_hint(p["name"])
+                        dm = "same_section" if fh == "section" else ("same_zoom" if fh == "detail" else "same_zoom")
+                    hd = DUP_HEADING.get(dm) or (p.get("label") or extra_heading(p))
+                    if dm.startswith("same"):
+                        if base in ("deformation", "stress"):
+                            vk = "section" if "section" in dm else "zoom"
+                            c["views"].append({"id": p["id"], "view_kind": vk, "label": DUP_HEADING.get(dm) or p.get("label") or "Detail view",
+                                               "parent_id": mains[0]["id"], "parent_conf": "sure",
+                                               "parent_kind": "deformation" if base == "deformation" else "vm",
+                                               "has_tag": bool(p.get("max_tag")), "from_dup": True, "dup_mode": dm})
+                        else:
+                            c["bc_extra_same"].append({"id": p["id"], "heading": DUP_HEADING.get(dm) or p.get("label") or "View 2", "dup_mode": dm})
+                    else:
+                        c["extras"].append({"id": p["id"], "kind": base, "heading": hd, "max": p.get("max"),
+                                            "unit": p.get("unit"), "auto": True, "layout": "separate", "from_dup": True, "dup_mode": dm})
             if mains:
                 c[slot] = mains[0]["id"]
+        other_groups = {}
         for p in infos:
             if p.get("case") != n:
                 continue
             if p["role"] in ("x_bc", "x_deformation", "x_stress"):
+                dm = (p.get("dup_mode") or "").strip()
+                lay = "separate" if dm.startswith("sep") else ("side" if dm.startswith("same") else "")
                 c["extras"].append({"id": p["id"], "kind": p["role"][2:], "heading": extra_heading(p), "max": p.get("max"),
-                                    "unit": p.get("unit"), "auto": bool(p.get("auto_extra"))})
+                                    "unit": p.get("unit"), "auto": bool(p.get("auto_extra")), "layout": lay, "dup_mode": dm})
             elif p["role"] == "x_other":
                 kid = p.get("kind") or ""
+                sc_key = (p.get("scope") or "").strip().lower()
+                other_groups.setdefault((kid, sc_key), []).append(p)
+        for (kid, _sc_key), plist in other_groups.items():
+            for idx_p, p in enumerate(plist):
                 short = KIND_BY_ID[kid][2] if kid in KIND_BY_ID else (p.get("result_kind") or "Result")
                 lo = p.get("min")
                 if kid in ("min_principal", "safety") and p.get("legend_values"):      # the number that matters is the LOW end: the bottom of the legend
                     lo = p["legend_values"][-1]
-                c["more"].append({"id": p["id"], "kind": kid, "kind_label": p.get("kind_label") or p.get("result_kind") or "", "scope": p.get("scope") or "",
-                                  "heading": short, "max": p.get("max"), "min": lo, "unit": p.get("unit") or (KIND_BY_ID[kid][4] if kid in KIND_BY_ID else ""),
-                                  "part": bool(p.get("scope"))})
+                dm = (p.get("dup_mode") or "").strip()
+                if idx_p > 0 and dm.startswith("same"):
+                    vk = "section" if "section" in dm else "zoom"
+                    c["views"].append({"id": p["id"], "view_kind": vk, "label": DUP_HEADING.get(dm) or p.get("label") or "Detail view",
+                                       "parent_id": plist[0]["id"], "parent_conf": "sure", "parent_kind": kid,
+                                       "has_tag": bool(p.get("max_tag")), "from_dup": True, "dup_mode": dm})
+                else:
+                    hd = f"{short} \u2013 {DUP_HEADING[dm]}" if (idx_p > 0 and dm in DUP_HEADING) else short
+                    c["more"].append({"id": p["id"], "kind": kid, "kind_label": p.get("kind_label") or p.get("result_kind") or "", "scope": p.get("scope") or "",
+                                      "heading": hd, "max": p.get("max"), "min": lo, "unit": p.get("unit") or (KIND_BY_ID[kid][4] if kid in KIND_BY_ID else ""),
+                                      "part": bool(p.get("scope")), "dup_mode": dm})
         first = {}
         for m in c["more"]:                                      # parts in the order they were uploaded; results of the whole model first
             first.setdefault(m["scope"].lower(), m["id"])
@@ -943,28 +1062,34 @@ def assign_cases(infos):
             p["parent_id"], p["parent_conf"] = pid, conf
             c["views"].append({"id": p["id"], "view_kind": p.get("view_kind") or "", "label": p.get("label") or "", "parent_id": pid,
                                "parent_conf": conf, "parent_kind": p.get("parent_kind") or "", "has_tag": bool(p.get("max_tag"))})
-        name, sub = (bc["headline"] if bc else ("", ""))
+        # Use ONLY the Setup screenshot's first bold heading (bc['model']) for the Setup page main heading
+        bc_model = (bc or {}).get("model")
+        if bc:
+            name, sub = case_headline(bc.get("bc_legend") or [], bc_model)
+            short_only, _ = case_headline(bc.get("bc_legend") or [])
+            short_name = short_only or name
+        else:
+            name, sub, short_name = "", "", ""
         pxs = [x["legend_px"] for x in (bc, d, s) if x and x.get("legend_px")]
         c.update(
-            name=name or f"Load Case {n}", subtitle=sub or "(Self Weight + Pressure)", short_name=name or f"Load Case {n}",
+            name=name or f"Load Case {n}", subtitle=sub or "(Self Weight + Pressure)", short_name=short_name or name or f"Load Case {n}",
             bc_items=[x["text"] for x in bc["bc_draft"]] if bc else [], bc_legend=[x["legend"] for x in bc["bc_draft"]] if bc else [],
             notes=[], def_unit=(d or {}).get("unit") or "mm", stress_unit=(s or {}).get("unit") or "MPa",
             def_max=d["max"] if d else None, stress_max=s["max"] if s else None,
             stress_red_px=s["red_px"] if s else None, stress_legend=s["legend_values"] if s else [],
             gravity=(bc or {}).get("gravity"), legend_px=(statistics.median(pxs) if pxs else None),
-            letter=(bc or d or s or {}).get("letter"), model=(bc or d or s or {}).get("model"))
+            letter=(bc or d or s or {}).get("letter"), model=bc_model or (d or s or {}).get("model"))
         out.append(c)
     return out
 
 
 def guess_cover(infos, settings=None):
     settings = settings or {}
-    names = [i["model"] for i in infos if i.get("model")]
+    bc_names = [i["model"] for i in infos if i.get("role") in ("bc", "x_bc") and i.get("model")]
+    names = bc_names or [i["model"] for i in infos if i.get("model")]
     model = max(names, key=lambda s: (s.count("_"), len(s))) if names else ""
-    toks = [t for t in re.split(r"[_\s]+", model) if t and "+" not in t and t.lower() not in LOAD_WORDS]
-    job = client = obj = ""
-    if len(toks) >= 3 and toks[0].isdigit():
-        job, client, obj = toks[0], toks[1], " ".join(toks[2:])
+    pm = parse_workbench_model(model)
+    job, client, obj = pm["job"], pm["client"], pm["obj"]
     today = _dt.date.today()
     d = today.day
     suffix = "th" if 10 <= d % 100 <= 20 else {1: "st", 2: "nd", 3: "rd"}.get(d % 10, "th")
@@ -1110,7 +1235,11 @@ def build_draft(infos, settings=None):
     cases = assign_cases(infos)
     geo, meshes = _views(infos, "geometry"), _views(infos, "mesh")
     heads = {}
-    for i in geo:
+    for idx_g, i in enumerate(geo):
+        dm = (i.get("dup_mode") or "").strip()
+        if idx_g >= 1 and dm in DUP_HEADING:
+            heads[i["id"]] = DUP_HEADING[dm]
+            continue
         h = {"up": "Top view", "down": "Bottom view"}.get(i.get("z_dir"), "")
         hint = file_hint(i["name"])
         if hint:
@@ -1118,11 +1247,16 @@ def build_draft(infos, settings=None):
         heads[i["id"]] = h
     for k, i in enumerate(geo, 1):                              # blank or repeated heading -> "View k"
         h = heads[i["id"]]
-        if not h or list(heads.values()).count(h) > 1:
+        if not h or (list(heads.values()).count(h) > 1 and h not in DUP_HEADING.values()):
             heads[i["id"]] = f"View {k}"
-    geo.sort(key=lambda i: {"Top view": 0, "Bottom view": 1}.get(heads[i["id"]], 2))        # top view first, whatever the upload order
+    if not any((i.get("dup_mode") or "").strip() for i in geo):
+        geo.sort(key=lambda i: {"Top view": 0, "Bottom view": 1}.get(heads[i["id"]], 2))        # top view first, whatever the upload order
     mheads = {}
     for k, i in enumerate(meshes):
+        dm = (i.get("dup_mode") or "").strip()
+        if k >= 1 and dm in DUP_HEADING:
+            mheads[i["id"]] = DUP_HEADING[dm]
+            continue
         hint = file_hint(i["name"])
         mheads[i["id"]] = "Overall mesh" if k == 0 and not hint else (
             f"{'Mesh section' if hint == 'section' else 'Mesh detail'} {PLACEHOLDER}" if hint else "Mesh detail [describe - please confirm]")
@@ -1170,8 +1304,8 @@ def build_draft(infos, settings=None):
     if not cases:
         warns.append({"level": "info", "text": "No load-case pictures (setup / deformation / stress) were recognised - the report would hold the cover, "
                                                "material, geometry and mesh slides only. Use the pictures table if some pictures were not recognised."})
-    return {"cases": cases, "geometry": [{"id": i["id"], "heading": heads[i["id"]]} for i in geo],
-            "meshes": [{"id": i["id"], "heading": mheads[i["id"]]} for i in meshes], "warnings": warns}
+    return {"cases": cases, "geometry": [{"id": i["id"], "heading": heads[i["id"]], "dup_mode": i.get("dup_mode") or ""} for i in geo],
+            "meshes": [{"id": i["id"], "heading": mheads[i["id"]], "dup_mode": i.get("dup_mode") or ""} for i in meshes], "warnings": warns}
 
 
 MANUAL_NOTE = ("The picture reader (Tesseract) is not installed, so I could not read the numbers from the pictures. "
@@ -1207,7 +1341,7 @@ def _blank_info(idx, name, path, W0, H0):
             "bc_legend": [], "bc_draft": [], "headline": ["", ""], "z_dir": None, "red_px": None, "edge_density": None,
             "result_kind": "", "legend_px": None, "gravity": None, "dup_of": None, "user_set": False,
             "kind": "", "kind_label": "", "scope": "", "view_kind": "", "parent_kind": "", "parent_id": None, "parent_conf": "",
-            "scope_hint": "", "label": "", "case_hint": None, "max_tag": None, "why": "", "case": None, "hash": ""}
+            "scope_hint": "", "label": "", "case_hint": None, "max_tag": None, "why": "", "case": None, "hash": "", "dup_mode": ""}
 
 
 def load_types(legend_lines):

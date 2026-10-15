@@ -67,9 +67,10 @@ const S = {
   mat: { rows: [], gov: 0 }, defLimit: '', showUtil: true, geometry: [], meshes: [], meshStats: {}, assumed: {}, assumeCustom: '',
   layouts: { results: 'auto', geometry: 'auto', bc: 'auto', extras: 'auto' },
   cases: [], warnings: [], checks: [], suggest: null, layoutPlan: null, missing: 'skip', manual: false, build: freshBuild(), dlBusy: false, unordered: [],
+  slideEdits: { items: {}, new_slides: [] }, pvEdit: false, pvSelUid: null,
 };
 const STATE_KEYS = ['took', 'skipped', 'cover', 'short', 'fos', 'fosText', 'units', 'mat', 'defLimit', 'showUtil', 'geometry', 'meshes',
-                    'meshStats', 'assumed', 'assumeCustom', 'layouts', 'cases', 'warnings', 'missing', 'manual', 'unordered'];
+                    'meshStats', 'assumed', 'assumeCustom', 'layouts', 'cases', 'warnings', 'missing', 'manual', 'unordered', 'slideEdits'];
 
 const KEY = 'fea_maker_v2';
 function loadSaved() { try { return JSON.parse(localStorage.getItem(KEY)) || {}; } catch (e) { return {}; } }
@@ -118,6 +119,7 @@ const hideAlert = () => { $('#alert').hidden = true; };
 const ICONS = {
   refresh: '<path d="M20 12a8 8 0 1 1-2.5-5.8M20 4v5.2h-5.2"/>', expand: '<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>',
   download: '<path d="M12 4v11m0 0l-4.5-4.5M12 15l4.5-4.5M5 20h14"/>', eye: '<path d="M2 12s3.7-7 10-7 10 7 10 7-3.7 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
+  save: '<path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/>',
 };
 function ico(name) {          // small line icon (inline SVG: no font or image files needed)
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -179,6 +181,16 @@ function bindUpload() {
   $('#btn-preview').addEventListener('click', () => { const c = $('#pv-card'); if (c) c.scrollIntoView({ block: 'start' }); previewNow().catch(() => {}); });
   $('#btn-pdf').addEventListener('click', () => downloadReport('pdf'));
   $('#btn-pptx').addEventListener('click', () => downloadReport('pptx'));
+  if ($('#btn-save')) $('#btn-save').addEventListener('click', () => saveCurrentWork(true));
+  if ($('#btn-top-save')) $('#btn-top-save').addEventListener('click', () => saveCurrentWork(true));
+  if ($('#btn-aside-save')) $('#btn-aside-save').addEventListener('click', () => saveCurrentWork(true));
+  if ($('#btn-new-report')) $('#btn-new-report').addEventListener('click', startNewReport);
+  document.addEventListener('keydown', e => {
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+      e.preventDefault();
+      saveCurrentWork(true);
+    }
+  });
   bindSlideBox();
 }
 
@@ -190,25 +202,202 @@ async function loadExample() {
   finally { busy(false); }
 }
 
-// ───────────────────────────── auto-save + resume ─────────────────────────────
+// ───────────────────────────── auto-save + manual save + recent files ─────────────────────────────
 function snapshot() { const o = { ver: 3 }; for (const k of STATE_KEYS) o[k] = S[k]; return JSON.parse(JSON.stringify(o)); }
 let saveTimer = null;
+
+async function saveStateNow(manual = false) {
+  if (!S.sid) return null;
+  clearTimeout(saveTimer);
+  const needsCount = $$('#s-review .need').length;
+  const r = await post('/api/state', { sid: S.sid, state: snapshot(), needs_count: needsCount, manual_save: manual });
+  updateSaveIndicator(r.entry || { saved_dt: r.saved_dt, status: needsCount === 0 ? 'full' : 'partial', status_label: needsCount === 0 ? 'Fully Saved' : 'Partially Saved' });
+  await loadRecentFiles();
+  return r;
+}
+
+function updateSaveIndicator(entry) {
+  const box = $('#recent-save-state');
+  if (!box || !entry) return;
+  box.hidden = false;
+  const isFull = entry.status === 'full';
+  box.className = 'recent-save-state ' + (isFull ? 'full' : 'partial');
+  box.replaceChildren(
+    h('span', { class: 'rss-dot' }),
+    h('span', {}, h('b', {}, isFull ? 'Fully Saved' : 'Partially Saved'), entry.saved_dt ? ` \u00b7 ${entry.saved_dt}` : '')
+  );
+}
+
+function showSaveConfirmation(entry) {
+  if (!entry) return;
+  updateSaveIndicator(entry);
+  const isFull = entry.status === 'full';
+  const statusTxt = isFull ? 'Fully Completed & Saved' : (entry.stage === 'upload' ? 'Partially Saved (Upload Stage)' : `Partially Saved (${entry.needs_count || 0} item${entry.needs_count === 1 ? '' : 's'} remaining)`);
+  toast(h('div', {},
+    h('b', {}, `\u2713 File Saved: ${entry.title || 'Report'}`),
+    h('br'),
+    `Status: ${statusTxt}`,
+    h('small', {}, `Saved on ${entry.saved_dt || 'just now'} \u2014 available in Recent Files on the right.`)
+  ), 'ok', 6000);
+}
+
+async function saveCurrentWork(manual = true) {
+  if (!$('#s-review').hidden && S.sid) {
+    try {
+      const r = await saveStateNow(manual);
+      if (manual && r) showSaveConfirmation(r.entry);
+    } catch (e) {
+      if (manual) showAlert(e.message);
+    }
+    return;
+  }
+  if (!$('#s-upload').hidden && typeof U !== 'undefined' && U.items && U.items.length > 0) {
+    await saveUploadDraft();
+    return;
+  }
+  if (S.sid) {
+    try {
+      const r = await saveStateNow(manual);
+      if (manual && r) showSaveConfirmation(r.entry);
+    } catch (e) {
+      if (manual) showAlert(e.message);
+    }
+    return;
+  }
+  showAlert('Please add pictures first before saving a file.', 'warn');
+}
+
+async function startNewReport() {
+  if (!$('#s-review').hidden && S.sid) {
+    await saveStateNow(false).catch(() => {});
+  }
+  S.sid = null;
+  if (typeof U !== 'undefined') {
+    U.items.forEach(it => URL.revokeObjectURL(it.url));
+    U.items = [];
+    U.sid = null;
+    renderZones();
+    renderList();
+  }
+  show('upload');
+  loadRecentFiles();
+}
+
 function scheduleSave() {
   if (!S.sid || $('#s-review').hidden) return;
   markOutdated();                                          // the preview is NOT rebuilt: it only says "out of date"
   clearTimeout(saveTimer);
-  saveTimer = setTimeout(() => { post('/api/state', { sid: S.sid, state: snapshot() }).catch(() => {}); }, 800);
+  saveTimer = setTimeout(() => { saveStateNow(false).catch(() => {}); }, 800);
 }
+
 const ago = t => { const m = Math.max(0, Math.round((Date.now() / 1000 - t) / 60)); return m < 1 ? 'just now' : m < 60 ? `${m} min ago` : m < 1440 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} days ago`; };
+
+async function loadRecentFiles() {
+  try {
+    const r = await api('/api/recent');
+    renderRecentFiles(r.items || []);
+  } catch (e) { /* ignore background error */ }
+}
+
+function renderRecentFiles(items) {
+  const list = $('#recent-list'), cnt = $('#recent-count');
+  if (!list) return;
+  if (cnt) cnt.textContent = String(items.length);
+  if (!items.length) {
+    list.replaceChildren(h('div', { class: 'rf-empty' },
+      h('b', {}, 'No saved files yet'),
+      h('p', {}, 'Press the "Save" button at any time (even if partially filled) and your file will appear here with its date and time.')));
+    return;
+  }
+  const activeSid = !$('#s-review').hidden ? S.sid : (typeof U !== 'undefined' ? U.sid : null);
+  list.replaceChildren(...items.map(it => {
+    const isFull = it.status === 'full';
+    const isActive = activeSid === it.sid;
+    const statusBadge = h('span', { class: 'rf-status ' + (isFull ? 'full' : 'partial') },
+      isFull ? '\u2713 Fully Saved' : '\u25d0 Partially Saved');
+    const detailText = isFull
+      ? 'All fields complete'
+      : (it.stage === 'upload' ? 'Upload draft (pictures added)' : `${it.needs_count} field${it.needs_count === 1 ? '' : 's'} left to fill`);
+    const thumbEl = it.thumb_url
+      ? h('img', { class: 'rf-thumb', src: it.thumb_url, alt: '' })
+      : h('div', { class: 'rf-thumb empty' }, 'FEA');
+
+    return h('div', { class: 'rf-item' + (isActive ? ' active' : ''), onclick: () => openRecentFile(it.sid) },
+      h('div', { class: 'rf-top' },
+        thumbEl,
+        h('div', { class: 'rf-info' },
+          h('div', { class: 'rf-title-row' },
+            h('b', { class: 'rf-title', title: it.title }, it.title || 'Unnamed Report'),
+            isActive ? h('span', { class: 'rf-current' }, 'Open') : null
+          ),
+          it.subtitle ? h('div', { class: 'rf-sub', title: it.subtitle }, it.subtitle) : null,
+          h('div', { class: 'rf-meta' }, `${it.pictures} picture${it.pictures !== 1 ? 's' : ''}${it.cases_count ? ` \u00b7 ${it.cases_count} case${it.cases_count !== 1 ? 's' : ''}` : ''}`)
+        ),
+        h('button', { class: 'rf-del', type: 'button', title: 'Delete this saved file', onclick: e => { e.stopPropagation(); deleteRecentFile(it.sid, it.title); } }, '\u2715')
+      ),
+      h('div', { class: 'rf-badges' },
+        statusBadge,
+        h('span', { class: 'rf-detail' }, detailText)
+      ),
+      h('div', { class: 'rf-datetime' },
+        h('span', { class: 'rf-dt-main' }, `\ud83d\udcc5 ${it.saved_dt || ''}`),
+        h('span', { class: 'rf-ago' }, ago(it.saved_at))
+      ),
+      h('div', { class: 'rf-actions' },
+        h('button', { class: isActive ? 'secondary rf-open' : 'primary rf-open', type: 'button', onclick: e => { e.stopPropagation(); openRecentFile(it.sid); } },
+          isActive ? 'Currently Open' : (isFull ? 'Open Complete File' : 'Continue Editing'))
+      )
+    );
+  }));
+}
+
+async function openRecentFile(sid) {
+  try {
+    if (!$('#s-review').hidden && S.sid && S.sid !== sid) {
+      await saveStateNow(false).catch(() => {});
+    }
+    busy('Opening saved file ...');
+    const r = await api(`/api/session/${sid}`);
+    busy(false);
+    if (!r.found) { showAlert('That saved file could not be found.'); return; }
+    if (r.stage === 'upload') {
+      await restoreUploadDraft(r);
+      if (r.entry) updateSaveIndicator(r.entry);
+    } else {
+      resume(r);
+      if (r.entry) updateSaveIndicator(r.entry);
+      await loadRecentFiles();
+    }
+  } catch (e) {
+    busy(false);
+    showAlert(e.message);
+  }
+}
+
+async function deleteRecentFile(sid, title) {
+  await post('/api/discard', { sid }).catch(() => {});
+  if (S.sid === sid) {
+    const box = $('#recent-save-state');
+    if (box) box.hidden = true;
+  }
+  if (typeof U !== 'undefined' && U.sid === sid) U.sid = null;
+  await loadRecentFiles();
+  const resEl = $('#resume');
+  if (resEl) resEl.replaceChildren();
+  toast(`Removed "${title || 'Saved file'}" from Recent Files.`, 'info', 4000);
+}
+
 async function checkResume() {
+  await loadRecentFiles();
   try {
     const r = await api('/api/last');
     if (!r.found || !r.state || ![2, 3].includes(r.state.ver)) return;
+    const statusBadge = r.status === 'full' ? 'Fully Saved' : 'Partially Saved';
     $('#resume').replaceChildren(h('div', { class: 'resume' },
-      h('div', { class: 'grow' }, h('b', {}, 'Continue your last report?'), h('br'),
-        h('span', {}, `${r.title || 'Unnamed report'}  \u00b7  ${r.pictures} pictures  \u00b7  saved ${ago(r.saved_at)}`)),
+      h('div', { class: 'grow' }, h('b', {}, 'Continue your last saved report?'), h('br'),
+        h('span', {}, `${r.title || 'Unnamed report'}  \u00b7  ${statusBadge}  \u00b7  ${r.pictures} pictures  \u00b7  ${r.saved_dt || ('saved ' + ago(r.saved_at))}`)),
       h('button', { class: 'primary', type: 'button', onclick: () => resume(r) }, 'Continue'),
-      h('button', { class: 'secondary', type: 'button', onclick: async () => { await post('/api/discard', { sid: r.sid }).catch(() => {}); $('#resume').replaceChildren(); } }, 'Discard')));
+      h('button', { class: 'secondary', type: 'button', onclick: async () => { await deleteRecentFile(r.sid, r.title); } }, 'Discard')));
   } catch (e) { /* nothing to resume */ }
 }
 function resume(r) {
@@ -217,16 +406,42 @@ function resume(r) {
   for (const k of STATE_KEYS) if (r.state[k] !== undefined) S[k] = r.state[k];
   S.cases.forEach(c => { c.more = c.more || []; c.views = c.views || []; });
   S.unordered = S.unordered || [];
+  S.slideEdits = (r.state && r.state.slideEdits) ? r.state.slideEdits : { items: {}, new_slides: [] };
+  S.pvEdit = false; S.pvSelUid = null;
   S.checks = []; S.suggest = null; S.layoutPlan = null; S.build = freshBuild(); S.missing = r.state.missing || S.missing;
   $('#resume').replaceChildren();
   show('review'); renderReview(); scheduleDerive(); setTimeout(() => buildNow().catch(() => {}), 60);
+  loadRecentFiles();
 }
 
 // ───────────────────────────── start the review ─────────────────────────────
+function caseHasFiles(c) {
+  return Boolean(c && !c.closed && (
+    (c.bc_id !== null && c.bc_id !== undefined) ||
+    (c.def_id !== null && c.def_id !== undefined) ||
+    (c.stress_id !== null && c.stress_id !== undefined) ||
+    (c.more && c.more.length) ||
+    (c.views && c.views.length) ||
+    (c.extras && c.extras.length)
+  ));
+}
+
+function closeCase(caseNo) {
+  for (const img of S.images) {
+    if (img.case === caseNo) { img.role = 'unused'; img.case = null; }
+    else if (img.case && img.case > caseNo) { img.case -= 1; }
+  }
+  S.cases = S.cases.filter(c => c.n !== caseNo).map(c => Object.assign({}, c, { n: c.n > caseNo ? c.n - 1 : c.n }));
+  regroup();
+  scheduleSave();
+}
+
 function newCase(dc) {
+  const diffShort = Boolean(dc.short_name && dc.name && dc.short_name !== dc.name);
   return Object.assign({}, dc, {
-    def_max: nice(dc.def_max), stress_max: nice(dc.stress_max), notes: [], texts: {}, dirty: {}, obs: [], exceeds: null, tier: null,
+    def_max: nice(dc.def_max), stress_max: nice(dc.stress_max), notes: [], texts: {}, dirty: diffShort ? { short: true } : {}, obs: [], exceeds: null, tier: null,
     needsBasis: false, bc_items: dc.bc_items.slice(), bc_legend: (dc.bc_legend || []).slice(),
+    bc_extra_same: (dc.bc_extra_same || []).slice(),
     basis: '', sing_loc: '', stress_away: '', loc_stress: '', loc_def: '', react_applied: '', react_sum: '', layout: '', bc_layout: '',
     extras: (dc.extras || []).map(e => Object.assign({}, e, { caption: '' })),
     more: (dc.more || []).map(m => Object.assign({}, m, { max: nice(m.max), min: nice(m.min), allow: '', caption_edit: '', auto_caption: '', tier: null })),
@@ -250,13 +465,16 @@ function startReview(r) {
   S.meshStats = { type: '', elements: '', nodes: '', size: '', skew_avg: '', skew_max: '', oq_min: '' };
   S.assumed = {}; S.assumeCustom = '';
   S.layouts = { results: 'auto', geometry: 'auto', bc: 'auto', extras: 'auto' };
-  S.geometry = r.geometry.map(g => ({ id: g.id, heading: g.heading, caption: '' }));
-  S.meshes = r.meshes.map(g => ({ id: g.id, heading: g.heading, caption: '' }));
-  S.cases = r.cases.map(newCase);
+  S.geometry = r.geometry.map(g => ({ id: g.id, heading: g.heading, caption: '', dup_mode: g.dup_mode || '' }));
+  S.meshes = r.meshes.map(g => ({ id: g.id, heading: g.heading, caption: '', dup_mode: g.dup_mode || '' }));
+  S.cases = r.cases.map(newCase).filter(caseHasFiles);
   S.unordered = r.unordered || [];
+  S.slideEdits = { items: {}, new_slides: [] };
+  S.pvEdit = false; S.pvSelUid = null;
   show('review');
   renderReview();
   scheduleDerive();
+  saveStateNow(false).catch(() => {});
   setTimeout(() => buildNow().catch(() => {}), 60);                 // the preview appears by itself, nobody has to ask for it
 }
 
@@ -379,7 +597,21 @@ function optSelect(label, options, current, onchange, cls = 'sub-sel') {
   return sel;
 }
 
+function revDupKey(img) {
+  if (!img || ['unknown', 'unused', 'view'].includes(img.role)) return null;
+  if (img.role === 'geometry' || img.role === 'mesh') return img.role;
+  if (!img.case) return null;
+  const baseRole = img.role.replace(/^x_/, '');
+  if (baseRole === 'other') return `other:${img.case}:${img.kind || ''}:${(img.scope || '').toLowerCase()}`;
+  return `${baseRole}:${img.case}`;
+}
+
 function picturesCard() {
+  const dupCounts = new Map();
+  for (const img of S.images) {
+    const dk = revDupKey(img);
+    if (dk) dupCounts.set(dk, (dupCounts.get(dk) || 0) + 1);
+  }
   const rows = S.images.map(img => {
     const role = h('select', { class: 'sel', 'data-need': 'role', 'data-label': `What is ${img.name}`, 'aria-label': `What is ${img.name}` },
       ROLES.filter(r => r[0] !== 'unknown' || img.role === 'unknown').map(([v, t]) => h('option', { value: v, selected: v === img.role }, t)));
@@ -404,7 +636,25 @@ function picturesCard() {
         optSelect(`Which plot does ${img.name} belong to`, [['', 'Choose the plot ...'], ...plotChoices().map(p => [p.id, p.text])], img.parent_id,
           v => { touch(img, 'parent_id', v === '' ? null : parseInt(v, 10)); regroup(); }, 'sub-sel parent')));
     }
-    const attn = img.notes.length || img.confidence === 'low' || img.role === 'unknown' || (isView && (img.parent_id === null || img.parent_id === undefined));
+    const dk = revDupKey(img);
+    const isDup = Boolean(dk && (dupCounts.get(dk) || 0) > 1);
+    if (isDup) {
+      const dupSel = optSelect(`Slide placement for duplicate category of ${img.name}`, DUP_OPTIONS, img.dup_mode || '', v => {
+        touch(img, 'dup_mode', v);
+        S.images.forEach(other => {
+          if (other !== img && revDupKey(other) === dk && !other.dup_mode) {
+            touch(other, 'dup_mode', v);
+          }
+        });
+        regroup();
+      }, 'sub-sel dup-sel');
+      dupSel.dataset.need = 'req';
+      dupSel.dataset.label = `Pictures: choose same or separate slide (cut section or zoomed section) for ${img.name}`;
+      extra.push(h('label', { class: 'sub dup-ask' },
+        h('span', {}, 'Same category selected \u2014 place on slide as:'),
+        dupSel));
+    }
+    const attn = img.notes.length || img.confidence === 'low' || img.role === 'unknown' || (isView && (img.parent_id === null || img.parent_id === undefined)) || (isDup && !img.dup_mode);
     const why = img.why ? h('div', { class: 'why' }, 'Why: ', img.why) : null;
     return h('tr', { class: attn ? 'attn' : '' }, h('td', {}, thumb(img.id)), h('td', { class: 'fn' }, img.name, img.label ? h('small', {}, `your name: ${img.label}`) : null),
       h('td', {}, role, ...extra), h('td', {}, cs), h('td', { class: 'read' }, readSummary(img), why,
@@ -664,7 +914,14 @@ function caseCard(c, k) {
   const ev = (key, label, hint) => h('label', { class: 'f' }, h('span', {}, label, h('span', { class: 'opt' }, '  (optional)')), inp(c, key, { label: `Case ${c.n}: ${label}`, onchange: scheduleDerive }), hint ? h('small', {}, hint) : null);
 
   return h('section', { class: 'card', 'data-casecard': c.n },
-    h('div', { class: 'case-head' }, h('h2', {}, h('span', { class: 'num' }, String(7 + k)), `Load case ${c.n}`), h('span', { class: 'badge', 'data-badge': c.n, hidden: true })),
+    h('div', { class: 'case-head' },
+      h('h2', {}, h('span', { class: 'num' }, String(7 + k)), `Load case ${c.n}`),
+      h('div', { class: 'case-head-acts' },
+        h('span', { class: 'badge', 'data-badge': c.n, hidden: true }),
+        h('button', {
+          class: 'case-close', type: 'button', title: `Close Load case ${c.n}`,
+          onclick: () => closeCase(c.n)
+        }, '\u2715 Close case'))),
     h('div', { class: 'casepics' },
       h('figure', {}, thumb(c.bc_id, 'thumb big', 300), h('figcaption', {}, 'Setup')),
       h('figure', {}, thumb(c.def_id, 'thumb big', 300), h('figcaption', {}, 'Deformation')),
@@ -803,11 +1060,16 @@ function renderViews(c, box) {
     const lab = h('input', { type: 'text', value: nice(v.slide_label), placeholder: VIEW_DEFAULT[v.view_kind] || 'Detail view', 'aria-label': 'Label on the slide' });
     lab.addEventListener('input', () => { v.slide_label = lab.value; scheduleSave(); });
     const lf = (label, el) => h('label', { class: 'f' }, h('span', {}, label), el);
-    return h('div', { class: 'xitem view' }, thumb(v.id, 'thumb', 220),
-      h('div', {}, h('span', { class: 'kindtag' }, v.view_kind === 'section' ? 'cut section' : v.view_kind === 'zoom' ? 'zoomed view' : 'detail view'),
-        h('span', { class: 'meta' }, `${img.name || ''}${v.parent_conf === 'guess' ? '  \u00b7  my guess for the plot: please check' : ''}`),
-        h('div', { class: 'grid' }, lf('Kind of picture', kind), lf('Belongs to (the slide it is placed on)', par)),
-        lf('Label on the slide', lab)),
+    return h('div', { class: 'xitem view' }, thumb(v.id, 'thumb', 260),
+      h('div', {},
+        h('div', { class: 'head-row' },
+          h('span', { class: 'kindtag' }, v.view_kind === 'section' ? 'cut section' : v.view_kind === 'zoom' ? 'zoomed view' : 'detail view'),
+          h('span', { class: 'fn-title' }, img.name || ''),
+          v.parent_conf === 'guess' ? h('span', { class: 'meta' }, '\u00b7  my guess for the plot: please check') : null),
+        h('div', { class: 'grid view-grid' },
+          lf('1. Kind of picture', kind),
+          lf('2. Belongs to (which slide it goes on)', par),
+          lf('3. Label on the slide', lab))),
       h('div', { class: 'acts' }, h('button', { type: 'button', onclick: () => { if (img.id !== undefined) { img.role = 'unused'; img.case = null; regroup(); } } }, 'Remove')));
   }));
 }
@@ -910,8 +1172,8 @@ async function regroup() {
     S.images = r.images; S.warnings = r.warnings;
     const keep = (oldList, id) => oldList.find(o => o.id === id);
     const og = S.geometry, om = S.meshes;
-    S.geometry = r.geometry.map(g => { const o = keep(og, g.id); return { id: g.id, heading: o ? o.heading : g.heading, caption: o ? o.caption : '' }; });
-    S.meshes = r.meshes.map(g => { const o = keep(om, g.id); return { id: g.id, heading: o ? o.heading : g.heading, caption: o ? o.caption : '' }; });
+    S.geometry = r.geometry.map(g => { const o = keep(og, g.id); return { id: g.id, heading: g.dup_mode ? g.heading : (o ? o.heading : g.heading), caption: o ? o.caption : '', dup_mode: g.dup_mode || '' }; });
+    S.meshes = r.meshes.map(g => { const o = keep(om, g.id); return { id: g.id, heading: g.dup_mode ? g.heading : (o ? o.heading : g.heading), caption: o ? o.caption : '', dup_mode: g.dup_mode || '' }; });
     const old = new Map(S.cases.map(c => [c.n, c]));
     S.cases = r.cases.map(dc => {
       const o = old.get(dc.n);
@@ -919,18 +1181,23 @@ async function regroup() {
       const c = Object.assign({}, o);
       const bcChanged = o.bc_id !== dc.bc_id;
       c.bc_id = dc.bc_id; c.def_id = dc.def_id; c.stress_id = dc.stress_id;
+      c.bc_extra_same = (dc.bc_extra_same || []).slice();
       c.stress_red_px = dc.stress_red_px; c.stress_legend = dc.stress_legend; c.stress_unit = dc.stress_unit; c.def_unit = dc.def_unit;
       c.gravity = dc.gravity; c.legend_px = dc.legend_px;
-      c.extras = dc.extras.map(e => { const oe = (o.extras || []).find(x => x.id === e.id); return Object.assign({}, e, { heading: oe ? oe.heading : e.heading, caption: oe ? oe.caption : '' }); });
+      c.extras = dc.extras.map(e => { const oe = (o.extras || []).find(x => x.id === e.id); return Object.assign({}, e, { heading: e.layout ? e.heading : (oe ? oe.heading : e.heading), caption: oe ? oe.caption : '' }); });
       c.more = (dc.more || []).map(m => { const om = (o.more || []).find(x => x.id === m.id);
         return Object.assign({}, m, { max: nice(om ? om.max : m.max), min: nice(om ? om.min : m.min), allow: om ? om.allow : '', caption_edit: om ? om.caption_edit : '',
                                       auto_caption: om ? om.auto_caption : '', tier: om ? om.tier : null }); });
       c.views = (dc.views || []).map(v => { const ov = (o.views || []).find(x => x.id === v.id); return Object.assign({}, v, { slide_label: ov ? ov.slide_label : '' }); });
-      if (bcChanged) { c.bc_items = dc.bc_items.slice(); c.bc_legend = dc.bc_legend.slice(); c.name = dc.name; c.subtitle = dc.subtitle; c.short_name = dc.short_name; }
+      if (bcChanged) {
+        c.bc_items = dc.bc_items.slice(); c.bc_legend = dc.bc_legend.slice();
+        c.name = dc.name; c.subtitle = dc.subtitle; c.short_name = dc.short_name;
+        if (dc.short_name && dc.name && dc.short_name !== dc.name) c.dirty.short = true;
+      }
       if (o.def_id !== dc.def_id) c.def_max = nice(dc.def_max);
       if (o.stress_id !== dc.stress_id) c.stress_max = nice(dc.stress_max);
       return c;
-    });
+    }).filter(caseHasFiles);
     renderReview(); scheduleDerive();
   } catch (e) { showAlert(e.message); }
   finally { busy(false); }
@@ -947,7 +1214,7 @@ function deriveBody() {
     def_limit: num(S.defLimit), material: { E: row.E, nu: row.nu, rho: row.rho }, mat_rows: S.mat.rows.map(r => ({ item: r.item, material: r.material, yield: num(r.yield) })),
     mesh_stats: S.meshStats, assumptions: assumptionsList(),
     layouts: S.layouts, geometry: S.geometry.map(g => ({ id: g.id })), meshes: S.meshes.map(g => ({ id: g.id })),
-    cases: S.cases.map(c => ({ n: c.n, def_max: num(c.def_max), stress_max: num(c.stress_max), red_px: c.stress_red_px, legend: c.stress_legend || [],
+    cases: S.cases.filter(caseHasFiles).map(c => ({ n: c.n, def_max: num(c.def_max), stress_max: num(c.stress_max), red_px: c.stress_red_px, legend: c.stress_legend || [],
       stress_unit: c.stress_unit, def_unit: c.def_unit, basis: c.basis, sing_loc: c.sing_loc, stress_away: c.stress_away, loc_stress: c.loc_stress,
       loc_def: c.loc_def, react_applied: c.react_applied, react_sum: c.react_sum, gravity: c.gravity, legend_px: c.legend_px, layout: c.layout,
       bc_layout: c.bc_layout, bc_id: c.bc_id, def_id: c.def_id, stress_id: c.stress_id, bc_items: c.bc_items, notes: c.notes,
@@ -1030,17 +1297,18 @@ function buildPayload() {
   return {
     sid: S.sid, cover: S.cover, short: S.short, fos: S.fos, yield: num(row.yield), allowable: govAllow(), show_utilisation: S.showUtil, def_limit: num(S.defLimit),
     material: { rows: S.mat.rows.map(r => [r.material, r.item, r.E, r.nu, r.rho, r.yield, String(allowOf(r) ?? '')]), units: S.units },
-    geometry: S.geometry.map(g => ({ id: g.id, heading: g.heading, caption: g.caption })),
-    meshes: S.meshes.map(g => ({ id: g.id, heading: g.heading, caption: g.caption })), mesh_stats: S.meshStats,
+    geometry: S.geometry.map(g => ({ id: g.id, heading: g.heading, caption: g.caption, dup_mode: g.dup_mode || '' })),
+    meshes: S.meshes.map(g => ({ id: g.id, heading: g.heading, caption: g.caption, dup_mode: g.dup_mode || '' })), mesh_stats: S.meshStats,
     assumptions: assumptionsList(), layouts: S.layouts,
-    cases: S.cases.map(c => ({ n: c.n, name: c.name, subtitle: c.subtitle, short_name: c.short_name, bc_id: c.bc_id, def_id: c.def_id,
-      stress_id: c.stress_id, bc_items: c.bc_items, notes: c.notes, def_max: c.def_max, stress_max: c.stress_max, basis: c.basis, sing_loc: c.sing_loc,
+    cases: S.cases.filter(caseHasFiles).map(c => ({ n: c.n, name: c.name, subtitle: c.subtitle, short_name: c.short_name, bc_id: c.bc_id, def_id: c.def_id,
+      stress_id: c.stress_id, bc_extra_same: c.bc_extra_same || [], bc_items: c.bc_items, notes: c.notes, def_max: c.def_max, stress_max: c.stress_max, basis: c.basis, sing_loc: c.sing_loc,
       stress_away: c.stress_away, loc_stress: c.loc_stress, loc_def: c.loc_def, react_applied: c.react_applied, react_sum: c.react_sum,
-      layout: c.layout, bc_layout: c.bc_layout, legend_px: c.legend_px, extras: c.extras.map(e => ({ id: e.id, kind: e.kind, heading: e.heading, caption: e.caption, max: e.max })),
+      layout: c.layout, bc_layout: c.bc_layout, legend_px: c.legend_px, extras: c.extras.map(e => ({ id: e.id, kind: e.kind, heading: e.heading, caption: e.caption, max: e.max, layout: e.layout })),
       more: c.more.map(m => ({ id: m.id, kind: m.kind, kind_label: m.kind_label, scope: m.scope, heading: m.heading, max: m.max, min: m.min, unit: m.unit, allow: m.allow, caption_edit: m.caption_edit })),
       views: c.views.map(v => ({ id: v.id, view_kind: v.view_kind, label: v.slide_label || '', parent_id: v.parent_id })),
       texts: textsPayload(c) })),
     missing: S.missing,
+    slide_edits: S.slideEdits || { items: {}, new_slides: [] },
   };
 }
 
@@ -1051,11 +1319,37 @@ function slideWidth() {
   return Math.min(2000, Math.max(640, Math.ceil(css * (window.devicePixelRatio || 1) / 160) * 160));
 }
 
+function ensureSlideEdits() {
+  if (!S.slideEdits || typeof S.slideEdits !== 'object') S.slideEdits = { items: {}, new_slides: [] };
+  if (!S.slideEdits.items || typeof S.slideEdits.items !== 'object') S.slideEdits.items = {};
+  if (!Array.isArray(S.slideEdits.new_slides)) S.slideEdits.new_slides = [];
+  return S.slideEdits;
+}
+
+function getSlideEdit(uid) {
+  const se = ensureSlideEdits();
+  if (!se.items[uid]) se.items[uid] = {};
+  return se.items[uid];
+}
+
+function applyPvEditsNow() {
+  scheduleSave();
+  buildNow().catch(() => {});
+}
+
+function togglePvEdit() {
+  S.pvEdit = !S.pvEdit;
+  renderPreview();
+}
+
 function previewCard() {
   const nav = (cls, label, txt, delta) => h('button', { class: 'pv-nav ' + cls, type: 'button', id: 'pv-' + cls, 'aria-label': label,
     onclick: e => { e.stopPropagation(); gotoSlide(S.build.cur + delta); } }, txt);
-  const frame = h('div', { class: 'pv-frame loading', id: 'pv-frame', title: 'Click to see the slide full screen', onclick: openSlideBox },
-    h('img', { id: 'pv-img', alt: 'Preview of the slide' }), h('div', { class: 'pv-wait', id: 'pv-wait' }));
+  const frame = h('div', { class: 'pv-frame loading', id: 'pv-frame', title: 'Click to see the slide full screen',
+    onclick: e => { if (!S.pvEdit && !e.target.closest('.pv-canvas')) openSlideBox(); } },
+    h('img', { id: 'pv-img', alt: 'Preview of the slide' }),
+    h('div', { class: 'pv-canvas', id: 'pv-canvas', hidden: !S.pvEdit }),
+    h('div', { class: 'pv-wait', id: 'pv-wait' }));
   const missing = h('select', { id: 'pv-missing', 'aria-label': 'What to do when a picture is missing' },
     h('option', { value: 'skip', selected: S.missing === 'skip' }, 'Leave that slide out'),
     h('option', { value: 'frame', selected: S.missing === 'frame' }, 'Keep an empty frame to fill in PowerPoint'));
@@ -1063,21 +1357,313 @@ function previewCard() {
   return h('section', { class: 'card pv', id: 'pv-card' },
     h('div', { class: 'pv-head' }, h('h2', {}, 'Report preview'),
       h('span', { class: 'pv-status busy', id: 'pv-status' }, h('i'), h('span', { id: 'pv-status-text' }, 'Preparing ...')),
+      h('button', { class: 'secondary' + (S.pvEdit ? ' active-edit' : ''), type: 'button', id: 'pv-edit-btn', onclick: togglePvEdit },
+        S.pvEdit ? '\u2713 Done editing slide' : '\u270e Edit slide & images'),
       h('button', { class: 'secondary', type: 'button', id: 'pv-refresh', onclick: () => previewNow().catch(() => {}) }, ico('refresh'), 'Update preview'),
       h('button', { class: 'secondary', type: 'button', id: 'pv-full', onclick: openSlideBox }, ico('expand'), 'Full screen')),
-    h('p', { class: 'sub' }, 'This is your real report, drawn from the PowerPoint file that is built from what you see below. It is made once when I have read the pictures. After that it changes only when you press the ', h('b', {}, 'Preview'), ' button.'),
+    h('p', { class: 'sub' }, 'This is your real report, drawn from the PowerPoint file that is built from what you see below. Click ',
+      h('b', {}, '\u270e Edit slide & images'), ' to drag/rearrange images on the slide, resize them bigger or smaller, add/edit captions, move an image to another slide, or delete an image.'),
     h('div', { class: 'pv-outdated', id: 'pv-outdated', hidden: true }, h('span', {}, 'You changed something after this preview was made, so it still shows the previous version.'),
       h('button', { class: 'primary', type: 'button', onclick: () => previewNow().catch(() => {}) }, 'Update preview')),
     h('div', { class: 'pv-stage' }, frame, nav('prev', 'Previous slide', '\u2039', -1), nav('next', 'Next slide', '\u203A', 1)),
     h('div', { class: 'pv-bar' }, h('span', { class: 'pv-count', id: 'pv-count' }), h('span', { class: 'pv-title', id: 'pv-title' })),
+    h('div', { class: 'pv-editor', id: 'pv-editor', hidden: !S.pvEdit }),
     h('div', { class: 'pv-strip', id: 'pv-strip' }),
     h('div', { class: 'pv-notes', id: 'pv-notes', hidden: true }),
     h('div', { class: 'pv-todo', id: 'pv-todo', hidden: true }),
     h('div', { class: 'pv-actions' },
       h('label', { class: 'miss' }, h('span', {}, 'If a picture is missing:'), missing),
       h('span', { class: 'grow' }),
+      h('button', { class: 'secondary save-action', type: 'button', onclick: () => saveCurrentWork(true) }, ico('save'), 'Save File'),
       h('button', { class: 'secondary', type: 'button', 'data-dl': 'pdf', onclick: () => downloadReport('pdf') }, ico('download'), 'Download PDF'),
       h('button', { class: 'primary', type: 'button', 'data-dl': 'pptx', onclick: () => downloadReport('pptx') }, ico('download'), 'Download PowerPoint')));
+}
+
+function scalePvItem(im, factor) {
+  if (!im) return;
+  const cx = im.x + im.w / 2, cy = im.y + im.h / 2;
+  const nw = Math.max(45, Math.min(910, Math.round(im.w * factor * 10) / 10));
+  const nh = Math.max(35, Math.min(460, Math.round(im.h * factor * 10) / 10));
+  const nx = Math.max(8, Math.min(952 - nw, Math.round((cx - nw / 2) * 10) / 10));
+  const ny = Math.max(56, Math.min(532 - nh, Math.round((cy - nh / 2) * 10) / 10));
+  Object.assign(getSlideEdit(im.uid), { x: nx, y: ny, w: nw, h: nh });
+  applyPvEditsNow();
+}
+
+function centerPvItem(im) {
+  if (!im) return;
+  const nx = Math.round((480 - im.w / 2) * 10) / 10;
+  const ny = Math.round((295 - im.h / 2) * 10) / 10;
+  Object.assign(getSlideEdit(im.uid), { x: nx, y: ny, w: im.w, h: im.h });
+  applyPvEditsNow();
+}
+
+function deletePvItem(uid) {
+  if (!uid) return;
+  const ed = getSlideEdit(uid);
+  ed.deleted = true;
+  if (S.pvSelUid === uid) S.pvSelUid = null;
+  toast('Image removed from slide. You can restore it anytime in Edit slide & images.', 'info', 4500);
+  applyPvEditsNow();
+}
+
+function restorePvItem(uid) {
+  const se = ensureSlideEdits();
+  if (se.items[uid]) delete se.items[uid].deleted;
+  S.pvSelUid = uid;
+  applyPvEditsNow();
+}
+
+function resetPvItem(uid) {
+  const se = ensureSlideEdits();
+  delete se.items[uid];
+  applyPvEditsNow();
+}
+
+function resetAllPvEdits() {
+  S.slideEdits = { items: {}, new_slides: [] };
+  toast('Reset all manual slide & image edits.', 'info', 3500);
+  applyPvEditsNow();
+}
+
+function movePvItemToSlide(im, targetVal, customTitle) {
+  if (!im || targetVal === '' || targetVal === null || targetVal === undefined) return;
+  const se = ensureSlideEdits();
+  const ed = getSlideEdit(im.uid);
+  delete ed.x; delete ed.y; delete ed.w; delete ed.h;
+  if (targetVal === 'new') {
+    const newId = 'new_' + Date.now();
+    const defaultTitle = (customTitle || '').trim() || `${(S.build.slides[S.build.cur] && S.build.slides[S.build.cur].title) || 'Slide'} \u2013 ${im.name || 'Detail view'}`;
+    se.new_slides.push({ id: newId, after_slide: S.build.cur, title: defaultTitle });
+    ed.target_slide = newId;
+    const destSlideIdx = S.build.cur + 1;
+    scheduleSave();
+    buildNow().then(() => { gotoSlide(destSlideIdx); }).catch(() => {});
+  } else {
+    const dstIdx = parseInt(targetVal, 10);
+    if (isNaN(dstIdx)) return;
+    ed.target_slide = dstIdx;
+    scheduleSave();
+    buildNow().then(() => { gotoSlide(dstIdx); }).catch(() => {});
+  }
+}
+
+function startPvDrag(e, im, boxEl, mode) {
+  if (e.button !== 0) return;
+  e.preventDefault(); e.stopPropagation();
+  if (S.pvSelUid !== im.uid) {
+    S.pvSelUid = im.uid;
+    renderPvEditor();
+  }
+  const canvas = $('#pv-canvas');
+  if (!canvas) return;
+  const rect = canvas.getBoundingClientRect();
+  if (!rect.width || !rect.height) return;
+  const startX = e.clientX, startY = e.clientY;
+  const orig = { x: im.x, y: im.y, w: im.w, h: im.h };
+  const asp = orig.w / Math.max(1, orig.h);
+  let cur = Object.assign({}, orig);
+  let moved = false;
+
+  const targetBox = canvas.querySelector(`[data-uid="${im.uid}"]`) || boxEl;
+  if (targetBox) targetBox.classList.add('dragging');
+
+  const onMove = ev => {
+    const dxPt = ((ev.clientX - startX) / rect.width) * 960.0;
+    const dyPt = ((ev.clientY - startY) / rect.height) * 540.0;
+    if (Math.abs(dxPt) > 0.8 || Math.abs(dyPt) > 0.8) moved = true;
+    if (mode === 'move') {
+      cur.x = Math.max(6, Math.min(954 - orig.w, orig.x + dxPt));
+      cur.y = Math.max(54, Math.min(534 - orig.h, orig.y + dyPt));
+    } else {
+      let nx = orig.x, ny = orig.y, nw = orig.w, nh = orig.h;
+      if (mode.includes('e')) nw = Math.max(45, Math.min(954 - orig.x, orig.w + dxPt));
+      if (mode.includes('s')) nh = Math.max(35, Math.min(534 - orig.y, orig.h + dyPt));
+      if (mode.includes('w')) {
+        const maxDx = orig.w - 45;
+        const d = Math.max(-orig.x + 6, Math.min(maxDx, dxPt));
+        nx = orig.x + d; nw = orig.w - d;
+      }
+      if (mode.includes('n')) {
+        const maxDy = orig.h - 35;
+        const d = Math.max(-orig.y + 54, Math.min(maxDy, dyPt));
+        ny = orig.y + d; nh = orig.h - d;
+      }
+      if (mode.length === 2 && !ev.shiftKey) {
+        nh = Math.max(35, Math.min(470, nw / asp));
+        if (mode.includes('n')) ny = orig.y + orig.h - nh;
+      }
+      cur = { x: nx, y: ny, w: nw, h: nh };
+    }
+    if (targetBox) {
+      targetBox.style.left = `${(cur.x / 960) * 100}%`;
+      targetBox.style.top = `${(cur.y / 540) * 100}%`;
+      targetBox.style.width = `${(cur.w / 960) * 100}%`;
+      targetBox.style.height = `${(cur.h / 540) * 100}%`;
+    }
+  };
+
+  const onUp = () => {
+    window.removeEventListener('pointermove', onMove);
+    window.removeEventListener('pointerup', onUp);
+    if (targetBox) targetBox.classList.remove('dragging');
+    if (moved) {
+      Object.assign(getSlideEdit(im.uid), {
+        x: Math.round(cur.x * 10) / 10,
+        y: Math.round(cur.y * 10) / 10,
+        w: Math.round(cur.w * 10) / 10,
+        h: Math.round(cur.h * 10) / 10,
+      });
+      applyPvEditsNow();
+    }
+  };
+
+  window.addEventListener('pointermove', onMove);
+  window.addEventListener('pointerup', onUp);
+}
+
+function renderPvEditor() {
+  const B = S.build, has = !!(B.key && B.slides.length);
+  const editBtn = $('#pv-edit-btn');
+  if (editBtn) {
+    editBtn.classList.toggle('active-edit', !!S.pvEdit);
+    editBtn.textContent = S.pvEdit ? '\u2713 Done editing slide' : '\u270e Edit slide & images';
+  }
+  const canvas = $('#pv-canvas'), editor = $('#pv-editor'), frame = $('#pv-frame');
+  if (!canvas || !editor) return;
+  canvas.hidden = !S.pvEdit || !has;
+  editor.hidden = !S.pvEdit || !has;
+  if (frame) frame.classList.toggle('editing', !!(S.pvEdit && has));
+  if (!S.pvEdit || !has) return;
+
+  const sl = B.slides[B.cur] || {};
+  const imgs = sl.images || [];
+  if (!imgs.some(x => x.uid === S.pvSelUid)) {
+    S.pvSelUid = imgs.length ? imgs[0].uid : null;
+  }
+  const sel = imgs.find(x => x.uid === S.pvSelUid) || null;
+
+  // 1. Render interactive boxes on #pv-canvas
+  const boxes = imgs.map((im, idx) => {
+    const isSel = im.uid === S.pvSelUid;
+    const handles = isSel ? ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'].map(dir => {
+      const hEl = h('span', { class: 'pv-h ' + dir, title: 'Drag to resize image' });
+      hEl.addEventListener('pointerdown', e => startPvDrag(e, im, null, dir));
+      return hEl;
+    }) : [];
+    const delBtn = h('button', { class: 'pv-box-del', type: 'button', title: 'Delete this image from slide',
+      onclick: e => { e.stopPropagation(); deletePvItem(im.uid); } }, '\u2715');
+    delBtn.addEventListener('pointerdown', e => e.stopPropagation());
+    const box = h('div', {
+      class: 'pv-box' + (isSel ? ' sel' : ''),
+      'data-uid': im.uid,
+      style: `left:${(im.x / 960) * 100}%;top:${(im.y / 540) * 100}%;width:${(im.w / 960) * 100}%;height:${(im.h / 540) * 100}%`,
+      title: 'Drag to move image on slide \u00b7 Drag corners/edges to resize',
+    },
+      h('div', { class: 'pv-box-tag' }, h('span', {}, `${idx + 1}. ${im.name || 'Image'}`), delBtn),
+      ...handles
+    );
+    box.addEventListener('pointerdown', e => startPvDrag(e, im, box, 'move'));
+    return box;
+  });
+  canvas.replaceChildren(...boxes);
+
+  // 2. Render PowerPoint-style toolbar in #pv-editor
+  const se = ensureSlideEdits();
+  const deletedUids = Object.entries(se.items).filter(([, v]) => v && v.deleted).map(([k]) => k);
+  const hasAnyEdits = Object.keys(se.items).length > 0 || (se.new_slides && se.new_slides.length > 0);
+
+  if (!imgs.length) {
+    editor.replaceChildren(
+      h('div', { class: 'pv-ed-empty' },
+        h('span', {}, 'No movable images on this slide. Navigate to a slide with pictures (Geometry, Mesh, Setup, Results, or Extra views) to move, resize, caption, or rearrange images.'),
+        deletedUids.length ? h('div', { class: 'pv-ed-restore' },
+          h('b', {}, 'Deleted images: '),
+          ...deletedUids.map(u => h('button', { class: 'secondary sm', type: 'button', onclick: () => restorePvItem(u) }, `Restore ${u}`))) : null,
+        hasAnyEdits ? h('button', { class: 'secondary sm', type: 'button', onclick: resetAllPvEdits }, '\u21ba Reset all slide edits') : null
+      )
+    );
+    return;
+  }
+
+  const pills = imgs.map((im, idx) => h('button', {
+    type: 'button',
+    class: 'pv-pill' + (im.uid === S.pvSelUid ? ' on' : ''),
+    onclick: () => { S.pvSelUid = im.uid; renderPvEditor(); },
+  }, `${idx + 1}. ${im.name || 'Picture'}`));
+
+  const capInput = h('input', {
+    type: 'text',
+    value: sel ? (sel.caption || '') : '',
+    placeholder: 'Add or edit caption below this image on the slide ...',
+    'aria-label': 'Caption below selected image',
+  });
+  const applyCap = () => {
+    if (!sel) return;
+    getSlideEdit(sel.uid).caption = capInput.value.trim();
+    applyPvEditsNow();
+  };
+  capInput.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); applyCap(); } });
+
+  const lblInput = h('input', {
+    type: 'text',
+    value: sel ? (sel.label || '') : '',
+    placeholder: 'Optional heading/label above image (e.g. Cut section, Zoomed view)',
+    'aria-label': 'Heading or label above selected image',
+  });
+  const applyLbl = () => {
+    if (!sel) return;
+    getSlideEdit(sel.uid).label = lblInput.value.trim();
+    applyPvEditsNow();
+  };
+  lblInput.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); applyLbl(); } });
+
+  const moveSel = h('select', { class: 'sub-sel', 'aria-label': 'Move selected image to another slide' },
+    h('option', { value: '' }, 'Choose target slide / page ...'),
+    ...B.slides.map((sItem, sIdx) => h('option', { value: String(sIdx), disabled: sIdx === B.cur },
+      `Slide ${sIdx + 1}: ${sItem.title || 'Untitled'}${sIdx === B.cur ? ' (current)' : ''}`)),
+    h('option', { value: 'new' }, '+ New slide right after this page'));
+  const newSlideTitle = h('input', {
+    type: 'text',
+    class: 'pv-newtitle',
+    hidden: true,
+    placeholder: 'Title for the new slide (optional)',
+  });
+  moveSel.addEventListener('change', () => { newSlideTitle.hidden = moveSel.value !== 'new'; });
+
+  editor.replaceChildren(
+    h('div', { class: 'pv-ed-row top' },
+      h('div', { class: 'pv-ed-pills' }, h('span', { class: 'pv-ed-lbl' }, 'Select image on slide:'), ...pills),
+      h('div', { class: 'pv-ed-btns' },
+        h('button', { class: 'secondary sm', type: 'button', title: 'Make selected image larger', onclick: () => scalePvItem(sel, 1.14) }, '\uff0b Bigger'),
+        h('button', { class: 'secondary sm', type: 'button', title: 'Make selected image smaller', onclick: () => scalePvItem(sel, 0.88) }, '\uff0d Smaller'),
+        h('button', { class: 'secondary sm', type: 'button', title: 'Center selected image on slide', onclick: () => centerPvItem(sel) }, '\u21d4 Center'),
+        h('button', { class: 'secondary sm danger', type: 'button', title: 'Delete selected image from this slide', onclick: () => sel && deletePvItem(sel.uid) }, '\ud83d\uddd1 Delete image'),
+        sel && se.items[sel.uid] ? h('button', { class: 'secondary sm', type: 'button', onclick: () => resetPvItem(sel.uid) }, '\u21ba Reset image') : null,
+        hasAnyEdits ? h('button', { class: 'secondary sm', type: 'button', onclick: resetAllPvEdits }, '\u21ba Reset all edits') : null
+      )
+    ),
+    h('div', { class: 'pv-ed-grid' },
+      h('div', { class: 'pv-ed-field' },
+        h('span', { class: 'pv-ed-lbl' }, 'Caption under image on slide:'),
+        h('div', { class: 'pv-ed-inline' }, capInput,
+          h('button', { class: 'secondary sm', type: 'button', onclick: applyCap }, 'Apply caption'))
+      ),
+      h('div', { class: 'pv-ed-field' },
+        h('span', { class: 'pv-ed-lbl' }, 'Label above image (e.g. Cut section / Zoomed view):'),
+        h('div', { class: 'pv-ed-inline' }, lblInput,
+          h('button', { class: 'secondary sm', type: 'button', onclick: applyLbl }, 'Apply label'))
+      ),
+      h('div', { class: 'pv-ed-field span2' },
+        h('span', { class: 'pv-ed-lbl' }, 'Move this image (zoomed, cut-section, or plot) to another slide / page:'),
+        h('div', { class: 'pv-ed-inline' }, moveSel, newSlideTitle,
+          h('button', { class: 'primary sm', type: 'button', onclick: () => movePvItemToSlide(sel, moveSel.value, newSlideTitle.value) }, 'Move to page \u2794'))
+      )
+    ),
+    deletedUids.length ? h('div', { class: 'pv-ed-restore' },
+      h('b', {}, 'Deleted from slides: '),
+      ...deletedUids.map(u => h('button', { class: 'secondary sm', type: 'button', onclick: () => restorePvItem(u) }, `Restore (${u})`))) : null
+  );
 }
 
 function renderPreview() {
@@ -1131,6 +1717,7 @@ function renderPreview() {
     nb.replaceChildren(h('b', {}, 'Left out or simplified because something is missing:'), h('ul', {}, items.map(t => h('li', {}, t))));
   }
   renderTodo();
+  renderPvEditor();
   if (!$('#slidebox').hidden) renderSlideBox();
 }
 
