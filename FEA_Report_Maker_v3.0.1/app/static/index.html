@@ -2,215 +2,260 @@
 <html lang="en" data-theme="dark">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>FEA Report Maker — Simulation Report Studio</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0%25' stop-color='%2338bdf8'/%3E%3Cstop offset='100%25' stop-color='%232563eb'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='32' height='32' rx='8' fill='%23070d19'/%3E%3Cpath d='M6 23l6-10 4.5 5.5 4.5-9.5 5 14z' fill='url(%23g)'/%3E%3C/svg%3E">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>FEA Report Maker — Kinetic Engineering Studio</title>
 <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
 
-<!-- ───────── Living Animated Engineering Studio Backdrop (Aurora Orbs + 60fps FEA Mesh Canvas) ───────── -->
-<div id="studio-bg" class="studio-bg" aria-hidden="true">
+<!-- Interactive Ambient FEA Nodal Mesh & Aurora Backdrop -->
+<div class="studio-bg" id="studio-bg" aria-hidden="true">
   <div class="aurora-orb orb-1"></div>
   <div class="aurora-orb orb-2"></div>
   <div class="aurora-orb orb-3"></div>
-  <div class="cad-grid-overlay"></div>
-  <canvas id="fea-mesh-canvas" class="fea-mesh-canvas"></canvas>
+  <canvas id="fea-mesh-canvas"></canvas>
+  <div class="studio-vignette"></div>
 </div>
 
-<header class="top">
-  <div class="top-in">
-    <div class="brand">
-      <div class="logo" aria-hidden="true">
-        <span class="logo-ring"></span>
-        <svg viewBox="0 0 32 32" width="30" height="30">
-          <defs>
-            <linearGradient id="logoGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-              <stop offset="0%" stop-color="#38bdf8"/>
-              <stop offset="50%" stop-color="#3b82f6"/>
-              <stop offset="100%" stop-color="#818cf8"/>
-            </linearGradient>
-          </defs>
-          <path d="M5 24l7-11 5 6 5-10 5 15z" fill="url(#logoGrad)"/>
-          <path d="M5 24h22" stroke="#e2e8f0" stroke-width="2" stroke-linecap="round"/>
-          <circle cx="22" cy="9" r="2" fill="#38bdf8"/>
-        </svg>
-      </div>
-      <div class="brand-text">
-        <div class="brand-title-row">
-          <b>FEA Report Maker</b>
-          <span class="studio-pill"><i class="pulse-dot"></i>STUDIO v3.0.1</span>
+<!-- Studio Application Shell: Left Command Dock + Widescreen Workspace -->
+<div class="studio-shell">
+
+  <!-- Left Vertical Studio Command Dock -->
+  <aside class="studio-dock">
+    <header class="top">
+      <div class="brand">
+        <div class="brand-crest" aria-hidden="true">
+          <span class="crest-ring"></span>
+          <span class="crest-core"></span>
+          <svg class="crest-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polygon points="12 2 22 8.5 22 15.5 12 22 2 15.5 2 8.5 12 2"/>
+            <line x1="12" y1="22" x2="12" y2="15.5"/>
+            <polyline points="22 8.5 12 15.5 2 8.5"/>
+            <polyline points="2 15.5 12 8.5 22 15.5"/>
+            <line x1="12" y1="2" x2="12" y2="8.5"/>
+          </svg>
         </div>
-        <span>ANSYS Telemetry &rarr; Executive PowerPoint</span>
+        <div class="brand-copy">
+          <div class="brand-title-row">
+            <strong>FEA Report Maker</strong>
+            <span class="studio-pill"><i class="pulse-dot"></i> STUDIO v3.0</span>
+          </div>
+          <span>ANSYS Mechanical &rarr; Executive PowerPoint Studio</span>
+        </div>
       </div>
-    </div>
-    <ol class="steps" id="steps">
-      <li data-stage="upload" class="on"><i>1</i>Upload</li>
-      <li data-stage="review"><i>2</i>Review &amp; preview</li>
-      <li data-stage="done"><i>3</i>Download</li>
-    </ol>
-    <div class="top-actions">
-      <button id="btn-theme-toggle" class="top-btn theme-btn" type="button" title="Switch between Obsidian Dark Studio and Daylight Light Studio">
-        <svg class="ico theme-ico-dark" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M4.93 4.93l1.41 1.41m11.32 11.32l1.41 1.41M2 12h2m16 0h2M4.93 19.07l1.41-1.41m11.32-11.32l1.41-1.41"/></svg>
-        <span id="theme-label">Daylight</span>
-      </button>
-      <button id="btn-top-save" class="top-btn save-btn" type="button" title="Save current report (partially or fully) to Recent Files">
-        <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
-        <span>Save</span>
-      </button>
-      <button id="btn-new-report" class="top-btn" type="button" title="Start a new report">+ New</button>
-    </div>
+
+      <!-- Vertical Workflow Stage Switcher -->
+      <nav class="steps" id="steps" aria-label="Workflow stages">
+        <span data-s="upload" class="on"><b>1</b> Upload Studio</span>
+        <span data-s="review"><b>2</b> Review &amp; Deck Studio</span>
+        <span data-s="done"><b>3</b> Export Ready</span>
+      </nav>
+
+      <!-- Studio Quick Command Palette -->
+      <div class="top-actions">
+        <button class="top-btn theme-btn" id="btn-theme-toggle" type="button" title="Switch between Executive Obsidian (Dark) and Daylight Studio (Light) theme">
+          <svg class="ico" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
+          <span class="theme-lbl">Daylight Mode</span>
+        </button>
+        <button class="top-btn save-btn" id="btn-top-save" type="button" title="Save current report progress (Ctrl+S)">
+          <svg class="ico" viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+          Save File
+        </button>
+        <button class="top-btn" id="btn-new-report" type="button" title="Start a fresh report">New Report</button>
+      </div>
+    </header>
+
+    <!-- Integrated Recent Files Vault inside Left Studio Dock -->
+    <aside class="recent-aside" id="recent-aside" aria-label="Recent saved files">
+      <div class="recent-card">
+        <div class="recent-head">
+          <div class="recent-title-wrap">
+            <svg class="ico" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15.5 14"/></svg>
+            <h2>Recent Files</h2>
+            <span class="recent-badge" id="recent-count">0</span>
+          </div>
+          <button class="secondary sm" id="btn-aside-save" type="button" title="Save current report file (Ctrl+S)">
+            <svg class="ico" viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+            Save Now
+          </button>
+        </div>
+        <p class="recent-sub">Saved sessions with completion status &amp; timestamp.</p>
+        <div class="recent-save-state" id="recent-save-state" hidden></div>
+        <div class="recent-list" id="recent-list">
+          <div class="recent-empty">No saved files yet. Click <b>Save File</b> at any stage to keep your progress here.</div>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Telemetry & Capability Chips at Bottom of Dock -->
     <div class="chips" id="chips"></div>
-  </div>
-</header>
+  </aside>
 
-<div class="page-wrap">
-<main id="main">
-  <div id="alert" class="alert" hidden></div>
+  <!-- Right Widescreen Studio Workspace -->
+  <div class="page-wrap">
+    <main id="main">
+      <div id="alert" class="alert" hidden></div>
 
-  <!-- ───────── step 1 : upload ───────── -->
-  <section id="s-upload">
-    <div class="hero">
-      <div class="hero-top-badges">
-        <span class="hero-kicker"><i class="kicker-spark"></i>AUTOMATED FEA SIMULATION REPORT ENGINE</span>
-        <span class="hero-telemetry">100% LOCAL &bull; ZERO CLOUD UPLOAD &bull; 16:9 PPTX</span>
-      </div>
-      <h1>Drop your ANSYS screenshots</h1>
-      <p>Any order, any file names. I look at every picture, say what it is, read the numbers from the legends and write the first draft of the report.
-         You check it, fill in what only you know, and download the PowerPoint.</p>
+      <!-- STEP 1: Widescreen Split-Bento Upload Launchpad -->
+      <section id="s-upload">
+        <div id="resume"></div>
 
-      <!-- Animated 3-Stage FEA Telemetry Pipeline HUD -->
-      <div class="hero-pipeline" aria-hidden="true">
-        <div class="hp-node">
-          <div class="hp-icon scan-box">
-            <span class="laser-line"></span>
-            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 2L3 7v10l9 5 9-5V7l-9-5z"/><path d="M3 7l9 5 9-5M12 22V12"/></svg>
-          </div>
-          <div class="hp-meta">
-            <b>01 &middot; Vision &amp; OCR Ingest</b>
-            <span>Auto-detects Model, Mesh, BC &amp; Legends</span>
-          </div>
-        </div>
-        <div class="hp-connector"><span class="hp-packet"></span><span class="hp-packet d2"></span></div>
-        <div class="hp-node">
-          <div class="hp-icon contour-box">
-            <div class="contour-bars">
-              <i class="cb-1"></i><i class="cb-2"></i><i class="cb-3"></i><i class="cb-4"></i>
+        <!-- Compact Animated 3-Stage Pipeline Ribbon -->
+        <div class="card hero-card">
+          <div class="hero-top-split">
+            <div class="hero-copy-col">
+              <div class="hero-kicker">
+                <span class="kicker-badge">NEXT-GEN FEA WORKBENCH</span>
+                <span class="kicker-sep">&bull;</span>
+                <span>Automated OCR &bull; Live Slide Studio &bull; Zero Cloud Upload</span>
+              </div>
+              <h1>Turn ANSYS screenshots into an executive PowerPoint report.</h1>
+              <p class="lead">Configure your load cases on the left, drop your ANSYS pictures on the right, and launch the interactive Slide &amp; Engineering Studio.</p>
+            </div>
+            <div class="hero-quick-example">
+              <button class="secondary" id="btn-example" type="button">Load an example report (try the app without your own pictures)</button>
             </div>
           </div>
-          <div class="hp-meta">
-            <b>02 &middot; Physics &amp; Load Cases</b>
-            <span>FOS, Allowable Stress &amp; Verdict Synthesis</span>
+
+          <!-- Animated 3-Stage Visual Telemetry Pipeline -->
+          <div class="hero-pipeline" aria-hidden="true">
+            <div class="pipe-node">
+              <div class="pipe-visual scan-box">
+                <span class="scan-laser"></span>
+                <div class="mini-contour"></div>
+              </div>
+              <div class="pipe-meta">
+                <b>01 &middot; ANSYS Screenshots</b>
+                <span>Model, Mesh, Setup, Stress &amp; Def.</span>
+              </div>
+            </div>
+            <div class="pipe-connector"><span class="pipe-packet"></span></div>
+            <div class="pipe-node">
+              <div class="pipe-visual ai-core">
+                <span class="core-orbit o1"></span>
+                <span class="core-orbit o2"></span>
+                <span class="core-dot"></span>
+              </div>
+              <div class="pipe-meta">
+                <b>02 &middot; OCR + Physics Engine</b>
+                <span>Extracts headings, legends &amp; FOS checks</span>
+              </div>
+            </div>
+            <div class="pipe-connector"><span class="pipe-packet p2"></span></div>
+            <div class="pipe-node">
+              <div class="pipe-visual slide-deck-anim">
+                <span class="mini-slide s1"></span>
+                <span class="mini-slide s2"></span>
+                <span class="mini-slide s3"><i>PPTX</i></span>
+              </div>
+              <div class="pipe-meta">
+                <b>03 &middot; Executive .PPTX Deck</b>
+                <span>Interactive slide editor &amp; instant export</span>
+              </div>
+            </div>
           </div>
         </div>
-        <div class="hp-connector"><span class="hp-packet"></span><span class="hp-packet d2"></span></div>
-        <div class="hp-node">
-          <div class="hp-icon slide-box-anim">
-            <span class="mini-slide-frame"></span>
-            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8m-4-4v4"/></svg>
+
+        <!-- Widescreen 2-Column Split Launchpad: Left Config + Launch | Right Interactive Drop Zones -->
+        <div class="upload-studio-grid">
+          <div class="card upload-config-pane">
+            <div class="pane-kicker">STEP 01 &middot; CONFIGURATION &amp; LAUNCH</div>
+            <div class="up-setup" id="up-setup">
+              <div class="up-q">
+                <label for="up-ncases"><b>How many load cases are in this report?</b></label>
+                <select id="up-ncases">
+                  <option value="">Detect from the pictures (default)</option>
+                  <option value="1">1 load case</option>
+                  <option value="2">2 load cases</option>
+                  <option value="3">3 load cases</option>
+                  <option value="4">4 load cases</option>
+                  <option value="5">5 load cases</option>
+                  <option value="6">6 load cases</option>
+                  <option value="7">7 load cases</option>
+                  <option value="8">8 load cases</option>
+                  <option value="9">9 load cases</option>
+                  <option value="10">10 load cases</option>
+                </select>
+                <small id="up-ncases-help">Setting this makes the grouping reliable even when two load cases have similar boundary conditions.</small>
+              </div>
+              <div class="up-q">
+                <b>How do you want to add the pictures?</b>
+                <div class="seg" id="up-mode" role="group" aria-label="How to add pictures">
+                  <button type="button" data-m="bulk" class="on">All at once</button>
+                  <button type="button" data-m="cases">Load case by load case</button>
+                </div>
+                <small id="up-mode-help">Drop every screenshot into one box; the program sorts them.</small>
+              </div>
+            </div>
+
+            <div class="up-go">
+              <button class="primary big" id="up-read" type="button" disabled>Read the pictures &rarr;</button>
+              <button class="secondary save-action" id="up-save" type="button" disabled title="Save uploaded pictures to Recent Files">
+                <svg class="ico" viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+                Save File
+              </button>
+              <button class="secondary" id="up-clear" type="button" hidden>Start over</button>
+              <span id="up-count" class="up-count"></span>
+            </div>
           </div>
-          <div class="hp-meta">
-            <b>03 &middot; Interactive Slide Studio</b>
-            <span>Live 16:9 Canvas Editor &amp; Native PPTX</span>
+
+          <div class="card upload-drop-pane">
+            <div class="pane-kicker">STEP 02 &middot; CAD SCREENSHOT DROP MATRIX</div>
+            <div id="up-zones" class="up-zones"></div>
           </div>
         </div>
-      </div>
-    </div>
 
-    <div id="resume"></div>
-
-    <section class="card up-setup" id="up-setup">
-      <div class="up-q">
-        <label for="up-ncases"><b>1. How many load cases does this job have?</b></label>
-        <select id="up-ncases" aria-describedby="up-ncases-help"></select>
-        <small id="up-ncases-help"></small>
-      </div>
-      <div class="up-q">
-        <b id="up-mode-label">2. How do you want to add the pictures?</b>
-        <div class="seg" id="up-mode" role="group" aria-labelledby="up-mode-label">
-          <button type="button" data-mode="bulk" class="on" aria-pressed="true">All together (bulk)</button>
-          <button type="button" data-mode="cases" aria-pressed="false">Case by case</button>
+        <!-- Full-Width Uploaded Pictures Inspector Table -->
+        <div class="card" id="up-listcard" hidden>
+          <h2>Uploaded pictures &mdash; give any picture a name if you like <small>(optional)</small></h2>
+          <p class="sub">If a file is called <code>Screenshot (14).png</code>, you can type what it shows &mdash; for example <code>case 2 equivalent stress</code> or <code>mesh</code>. Leave it empty if the screenshot is a full ANSYS window: the program reads the text inside the picture.</p>
+          <div id="up-list" class="scroll"></div>
         </div>
-        <small id="up-mode-help"></small>
-      </div>
-    </section>
+      </section>
 
-    <div id="up-zones" class="up-zones one"></div>
-
-    <section class="card" id="up-listcard" hidden>
-      <h2><span class="num">3</span>Your pictures</h2>
-      <p class="sub">Optional but helpful: give a picture a <b>name</b> and say <b>what it is</b>. A zoomed or cut-section picture should be named after the result it belongs to
-         (for example <i>equivalent stress</i> or <i>shaft max shear</i>), so that I put it on the same slide as that result. Where you leave the type on
-         &ldquo;Let the app decide&rdquo;, I look at the picture itself.</p>
-      <div class="scroll" id="up-list"></div>
-    </section>
-
-    <div class="up-go">
-      <button id="up-read" class="primary big" type="button" disabled>Read the pictures</button>
-      <button id="up-save" class="secondary big" type="button" disabled title="Save these uploaded pictures to Recent Files for later">
-        <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
-        Save File
-      </button>
-      <button id="up-clear" class="link" type="button">Remove all</button>
-      <span id="up-count" class="up-count"></span>
-    </div>
-    <div class="try"><button id="btn-example" class="link" type="button" hidden>No pictures at hand? Try it with the 9 example pictures</button></div>
-
-    <div class="how">
-      <div><i>1</i><b>I read the pictures</b><p>What each one is (geometry, mesh, setup, deformation, stress, shear or principal results, zoomed and cut-section views), which load case it belongs to, the Max values and the support / load list. I tell you why I decided so, and I leave a case number blank when I am not sure.</p></div>
-      <div><i>2</i><b>You check the draft</b><p>Yellow boxes are things only you know: yield stress, support locations, client, report number. Suspicious results are flagged, never hidden. Every sentence can be edited.</p></div>
-      <div><i>3</i><b>I build the report</b><p>Same layout as your template. Zoomed and cut-section pictures go on the same slide as their full view. The preview changes only when you press the Preview button. Pictures you do not have are simply left out.</p></div>
-    </div>
-    <p class="priv"><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M7 11V8a5 5 0 0110 0v3M6 11h12v9H6z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
-      Everything stays on this computer. Nothing is uploaded to the internet.</p>
-  </section>
-
-  <!-- ───────── step 2 : review (built by app.js) ───────── -->
-  <section id="s-review" hidden></section>
-
-</main>
-
-<!-- ───────── Recent Files Sidebar (on one side of the page) ───────── -->
-<aside id="recent-aside" class="recent-aside" aria-label="Recent saved files">
-  <div class="recent-card">
-    <div class="recent-head">
-      <div class="recent-title-wrap">
-        <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15.5 14"/></svg>
-        <h2>Recent Files</h2>
-        <span id="recent-count" class="recent-badge">0</span>
-      </div>
-      <button id="btn-aside-save" class="save-pill" type="button" title="Save current work to Recent Files">
-        <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
-        Save
-      </button>
-    </div>
-    <p class="recent-sub">Saved files (partially or fully completed) with date &amp; time.</p>
-    <div id="recent-save-state" class="recent-save-state" hidden></div>
-    <div id="recent-list" class="recent-list"></div>
+      <!-- STEP 2: Review, Edit & Live PowerPoint Studio -->
+      <section id="s-review" hidden></section>
+    </main>
   </div>
-</aside>
 </div>
 
-<footer id="bar" class="bar" hidden>
+<!-- Sticky Bottom Studio Command Bar -->
+<footer class="bar" id="bar" hidden>
   <div class="bar-in">
     <div id="bar-msg" class="bar-msg"></div>
-    <button id="btn-save" class="secondary save-action" type="button"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg><span class="lbl">Save File</span></button>
-    <button id="btn-preview" class="secondary" type="button"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.7-7 10-7 10 7 10 7-3.7 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg><span class="lbl">Preview</span></button>
-    <button id="btn-pdf" class="secondary" type="button" data-dl="pdf"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11m0 0l-4.5-4.5M12 15l4.5-4.5M5 20h14"/></svg><span class="dlw">Download </span>PDF</button>
-    <button id="btn-pptx" class="primary" type="button" data-dl="pptx"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11m0 0l-4.5-4.5M12 15l4.5-4.5M5 20h14"/></svg><span class="dlw">Download </span>PowerPoint</button>
+    <button class="secondary save-action" id="btn-save" type="button" title="Save current report file (Ctrl+S)">
+      <svg class="ico" viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+      <span class="lbl">Save File</span>
+    </button>
+    <button class="secondary" id="btn-preview" type="button" title="Rebuild the preview above with your latest changes"><svg class="ico" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><polyline points="21 3 21 9 15 9"/></svg><span class="lbl">Update preview</span></button>
+    <button class="secondary" id="btn-pdf" data-dl="pdf" type="button"><svg class="ico" viewBox="0 0 24 24"><path d="M12 3v12m0 0l-4-4m4 4l4-4"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg><span class="dlw">Download</span>PDF</button>
+    <button class="primary" id="btn-pptx" data-dl="pptx" type="button"><svg class="ico" viewBox="0 0 24 24"><path d="M12 3v12m0 0l-4-4m4 4l4-4"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg><span class="dlw">Download</span>PowerPoint (.pptx)</button>
   </div>
 </footer>
 
-<div id="busy" class="busy" hidden><div class="spin"></div><p id="busy-msg">Working&hellip;</p><p id="busy-extra" class="busy-extra"></p><button id="busy-cancel" class="secondary" type="button" hidden>Cancel</button></div>
-<div id="modal" class="modal" hidden></div>
-<div id="lightbox" class="lightbox" hidden><img alt="Picture, full size"></div>
-<div id="slidebox" class="lightbox slidebox" hidden>
+<div class="busy" id="busy" hidden>
+  <div class="spin"></div>
+  <p id="busy-msg">Working ...</p>
+  <p id="busy-extra" class="busy-extra" hidden></p>
+  <button class="secondary" id="busy-cancel" type="button" hidden>Cancel</button>
+</div>
+
+<div class="modal" id="modal" hidden>
+  <div class="modal-box" id="modal-box"></div>
+</div>
+
+<div class="lightbox" id="lightbox" hidden>
+  <img alt="Enlarged picture">
+</div>
+
+<div class="lightbox slidebox" id="slidebox" hidden>
   <button class="sb-nav prev" type="button" aria-label="Previous slide">&#8249;</button>
-  <figure><img alt="Slide, full size"><figcaption></figcaption></figure>
+  <figure><img alt="Slide"><figcaption></figcaption></figure>
   <button class="sb-nav next" type="button" aria-label="Next slide">&#8250;</button>
   <button class="sb-close" type="button" aria-label="Close">&#10005;</button>
 </div>
-<div id="toasts" class="toasts" aria-live="polite"></div>
+
+<div class="toasts" id="toasts" aria-live="polite"></div>
 
 <script src="/static/upload.js"></script>
 <script src="/static/app.js"></script>

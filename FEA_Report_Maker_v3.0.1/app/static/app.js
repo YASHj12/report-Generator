@@ -484,18 +484,18 @@ function card(num, title, sub, ...body) {
     sub ? h('p', { class: 'sub' }, sub) : null, ...body);
 }
 
-function thumb(id, cls = 'thumb', w = 240) {
+function thumb(id, cls = 'thumb', w = 380) {
   if (id === null || id === undefined) return h('div', { class: cls + ' missing' }, 'none');
   const url = `/api/img/${S.sid}/${id}`;
-  const im = h('img', { class: cls, src: `${url}?w=${w}`, alt: '', title: 'Click to enlarge' });
+  const im = h('img', { class: cls, src: `${url}?w=${w}`, alt: '', title: 'Click to enlarge full picture' });
   im.addEventListener('click', () => lightbox(url));
   return im;
 }
 
-function evid(id, kind, caption, w = 300) {
+function evid(id, kind, caption, w = 440) {
   if (id === null || id === undefined) return null;
-  const im = h('img', { src: `/api/crop/${S.sid}/${id}/${kind}?w=${w}`, alt: caption, title: 'Click to enlarge' });
-  im.addEventListener('click', () => lightbox(`/api/crop/${S.sid}/${id}/${kind}?w=900`));
+  const im = h('img', { src: `/api/crop/${S.sid}/${id}/${kind}?w=${w}`, alt: caption, title: 'Click to enlarge crop' });
+  im.addEventListener('click', () => lightbox(`/api/crop/${S.sid}/${id}/${kind}?w=1100`));
   return h('figure', { class: 'evid' }, im, h('figcaption', {}, caption));
 }
 
@@ -530,15 +530,108 @@ function readSummary(i) {
   return bits.join('  \u00b7  ');
 }
 
+function setStudioCat(cat) {
+  S.studioCat = cat || 'all';
+  $$('#s-review [data-cat-btn]').forEach(btn => {
+    btn.classList.toggle('on', btn.dataset.catBtn === S.studioCat);
+  });
+  $$('#s-review [data-studio-cat]').forEach(sec => {
+    const match = S.studioCat === 'all' || sec.dataset.studioCat === S.studioCat;
+    sec.classList.toggle('studio-tab-hidden', !match);
+  });
+  const grid = $('#review-cards-grid');
+  if (grid) grid.classList.toggle('cat-filtered', S.studioCat !== 'all');
+}
+
+function toggleStudioSplit() {
+  S.studioSplit = !S.studioSplit;
+  const wb = $('#review-workbench');
+  if (wb) wb.classList.toggle('split-mode', !!S.studioSplit);
+  const btn = $('#pv-split-btn');
+  if (btn) {
+    btn.classList.toggle('active-split', !!S.studioSplit);
+    btn.textContent = S.studioSplit ? '\ud83c\udfac Theater Top View' : '\u25eb Split Side-by-Side';
+  }
+  setTimeout(() => renderPreview(), 60);
+}
+
 function renderReview() {
   const root = $('#s-review');
-  const parts = [introCard(), orderCard(), previewCard(), checksCard(), picturesCard(), coverCard(), materialCard(), layoutCard(), geometryCard(), assumptionsCard()];
-  if (S.cases.length) S.cases.forEach((c, k) => parts.push(caseCard(c, k)));
-  else parts.push(card('7', 'Load cases', 'No load case found. Use the pictures table above to say which pictures are setup, deformation and stress pictures.'));
+  if (!S.studioCat) S.studioCat = 'all';
+
+  const topBento = h('div', { class: 'review-top-bento' }, introCard(), checksCard());
+  const ord = orderCard();
+
+  const picSec = picturesCard();     picSec.dataset.studioCat = 'pics'; picSec.classList.add('bento-full');
+  const laySec = layoutCard();       laySec.dataset.studioCat = 'pics'; laySec.classList.add('bento-half');
+  const covSec = coverCard();        covSec.dataset.studioCat = 'meta'; covSec.classList.add('bento-half');
+  const matSec = materialCard();     matSec.dataset.studioCat = 'meta'; matSec.classList.add('bento-half');
+  const asmSec = assumptionsCard();  asmSec.dataset.studioCat = 'meta'; asmSec.classList.add('bento-half');
+  const geoSec = geometryCard();     geoSec.dataset.studioCat = 'geo';  geoSec.classList.add('bento-full');
+
+  const caseSecs = S.cases.length
+    ? S.cases.map((c, k) => {
+        const cs = caseCard(c, k);
+        cs.dataset.studioCat = 'cases';
+        cs.classList.add('bento-full');
+        return cs;
+      })
+    : [(() => {
+        const emptyC = card('7', 'Load cases', 'No load case found. Use the pictures table above to say which pictures are setup, deformation and stress pictures.');
+        emptyC.dataset.studioCat = 'cases';
+        emptyC.classList.add('bento-full');
+        return emptyC;
+      })()];
+
+  const catTabs = [
+    ['all',   '\u2726 All Sections (Bento Grid)'],
+    ['pics',  `\ud83d\uddbc Pictures & Layout (${S.images.length})`],
+    ['meta',  '\ud83d\udccb Cover, Material & Scope'],
+    ['geo',   '\ud83e\uddca Geometry & Mesh'],
+    ['cases', `\u26a1 Load Cases (${S.cases.length})`],
+  ];
+
+  const caseJumpPills = S.cases.length > 1 ? h('div', { class: 'case-jump-pills' },
+    h('span', { class: 'jump-lbl' }, 'Jump to case:'),
+    ...S.cases.map(c => h('button', {
+      type: 'button',
+      class: 'case-jump-btn',
+      onclick: () => {
+        if (S.studioCat !== 'all' && S.studioCat !== 'cases') setStudioCat('cases');
+        const el = $(`[data-casecard="${c.n}"]`);
+        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    }, `Case ${c.n}: ${c.short_name || c.name || 'Load Case ' + c.n}`))
+  ) : null;
+
+  const tabsBar = h('div', { class: 'review-tabs-bar' },
+    h('div', { class: 'review-tabs-nav', role: 'tablist', 'aria-label': 'Engineering inspector sections' },
+      ...catTabs.map(([id, label]) => h('button', {
+        type: 'button',
+        class: 'rev-tab-btn' + (S.studioCat === id ? ' on' : ''),
+        'data-cat-btn': id,
+        onclick: () => setStudioCat(id),
+      }, label))
+    ),
+    caseJumpPills
+  );
+
+  const cardsGrid = h('div', {
+    class: 'review-cards-grid' + (S.studioCat !== 'all' ? ' cat-filtered' : ''),
+    id: 'review-cards-grid'
+  }, picSec, covSec, matSec, laySec, asmSec, geoSec, ...caseSecs);
+
+  const inspector = h('div', { class: 'review-inspector' }, tabsBar, cardsGrid);
+  const workbench = h('div', {
+    class: 'review-workbench' + (S.studioSplit ? ' split-mode' : ''),
+    id: 'review-workbench'
+  }, previewCard(), inspector);
+
   const dl = h('div', { hidden: true });
   for (const k of HIST_KEYS) dl.append(h('datalist', { id: 'dl-' + k }, hist(k).map(v => h('option', { value: v }))));
-  parts.push(dl);
-  root.replaceChildren(...parts.filter(Boolean));              // (orderCard() is null when the order of the cases is clear)
+
+  root.replaceChildren(...[topBento, ord, workbench, dl].filter(Boolean));
+  setStudioCat(S.studioCat);
   renderChecks(); renderVerdicts(); renderHint(); refreshAllowable(); renderLayoutCard(); renderBasisBoxes(); refreshMoreStatus(); updateNeeds(); renderPreview();
 }
 
@@ -923,9 +1016,9 @@ function caseCard(c, k) {
           onclick: () => closeCase(c.n)
         }, '\u2715 Close case'))),
     h('div', { class: 'casepics' },
-      h('figure', {}, thumb(c.bc_id, 'thumb big', 300), h('figcaption', {}, 'Setup')),
-      h('figure', {}, thumb(c.def_id, 'thumb big', 300), h('figcaption', {}, 'Deformation')),
-      h('figure', {}, thumb(c.stress_id, 'thumb big', 300), h('figcaption', {}, 'Stress'))),
+      h('figure', {}, thumb(c.bc_id, 'thumb big', 600), h('figcaption', {}, 'Setup')),
+      h('figure', {}, thumb(c.def_id, 'thumb big', 600), h('figcaption', {}, 'Deformation')),
+      h('figure', {}, thumb(c.stress_id, 'thumb big', 600), h('figcaption', {}, 'Stress'))),
     h('div', { class: 'grid' },
       lf('Case name (slide title)', nameEl, 'span2'), lf('Subtitle', inp(c, 'subtitle', { label: `Case ${c.n} subtitle` }), 'span2'),
       lf('Short name in the final summary table', shortEl, 'span2')),
@@ -1279,6 +1372,10 @@ function updateNeeds() {
 }
 function gotoNeed() {
   const el = $('#s-review .need'); if (!el) return;
+  const sec = el.closest('[data-studio-cat]');
+  if (sec && S.studioCat && S.studioCat !== 'all' && sec.dataset.studioCat !== S.studioCat) {
+    setStudioCat(sec.dataset.studioCat);
+  }
   el.scrollIntoView({ block: 'center' }); if (el.focus) el.focus();
 }
 
@@ -1315,8 +1412,8 @@ function buildPayload() {
 // ───────────────────────────── the live preview of the real report ─────────────────────────────
 const slideUrl = (n, w) => `/api/slide/${S.sid}/${S.build.key}/${n}?w=${w}`;
 function slideWidth() {
-  const f = $('#pv-frame'), css = f && f.clientWidth ? f.clientWidth : 900;
-  return Math.min(2000, Math.max(640, Math.ceil(css * (window.devicePixelRatio || 1) / 160) * 160));
+  const f = $('#pv-frame'), css = f && f.clientWidth > 320 ? f.clientWidth : 1080;
+  return Math.min(2000, Math.max(1280, Math.ceil(css * (window.devicePixelRatio || 1) / 160) * 160));
 }
 
 function ensureSlideEdits() {
@@ -1355,20 +1452,32 @@ function previewCard() {
     h('option', { value: 'frame', selected: S.missing === 'frame' }, 'Keep an empty frame to fill in PowerPoint'));
   missing.addEventListener('change', () => { S.missing = missing.value; saveSaved(); scheduleSave(); });
   return h('section', { class: 'card pv', id: 'pv-card' },
-    h('div', { class: 'pv-head' }, h('h2', {}, 'Report preview'),
+    h('div', { class: 'pv-head' },
+      h('div', { class: 'pv-head-title' },
+        h('span', { class: 'pane-kicker' }, 'LIVE POWERPOINT PRESENTATION STUDIO'),
+        h('h2', {}, 'Report Slide Preview')),
       h('span', { class: 'pv-status busy', id: 'pv-status' }, h('i'), h('span', { id: 'pv-status-text' }, 'Preparing ...')),
+      h('button', { class: 'secondary' + (S.studioSplit ? ' active-split' : ''), type: 'button', id: 'pv-split-btn', onclick: toggleStudioSplit, title: 'Switch between Full-Width Theater Stage and Side-by-Side Split Studio' },
+        S.studioSplit ? '\ud83c\udfac Theater Top View' : '\u25eb Split Side-by-Side'),
       h('button', { class: 'secondary' + (S.pvEdit ? ' active-edit' : ''), type: 'button', id: 'pv-edit-btn', onclick: togglePvEdit },
         S.pvEdit ? '\u2713 Done editing slide' : '\u270e Edit slide & images'),
       h('button', { class: 'secondary', type: 'button', id: 'pv-refresh', onclick: () => previewNow().catch(() => {}) }, ico('refresh'), 'Update preview'),
       h('button', { class: 'secondary', type: 'button', id: 'pv-full', onclick: openSlideBox }, ico('expand'), 'Full screen')),
-    h('p', { class: 'sub' }, 'This is your real report, drawn from the PowerPoint file that is built from what you see below. Click ',
-      h('b', {}, '\u270e Edit slide & images'), ' to drag/rearrange images on the slide, resize them bigger or smaller, add/edit captions, move an image to another slide, or delete an image.'),
+    h('p', { class: 'sub' }, 'Live 16:9 widescreen preview rendered directly from your PowerPoint deck. Click any slide to inspect in Full Screen, or click ',
+      h('b', {}, '\u270e Edit slide & images'), ' to drag, resize, caption, or move images across slides.'),
     h('div', { class: 'pv-outdated', id: 'pv-outdated', hidden: true }, h('span', {}, 'You changed something after this preview was made, so it still shows the previous version.'),
       h('button', { class: 'primary', type: 'button', onclick: () => previewNow().catch(() => {}) }, 'Update preview')),
-    h('div', { class: 'pv-stage' }, frame, nav('prev', 'Previous slide', '\u2039', -1), nav('next', 'Next slide', '\u203A', 1)),
-    h('div', { class: 'pv-bar' }, h('span', { class: 'pv-count', id: 'pv-count' }), h('span', { class: 'pv-title', id: 'pv-title' })),
-    h('div', { class: 'pv-editor', id: 'pv-editor', hidden: !S.pvEdit }),
-    h('div', { class: 'pv-strip', id: 'pv-strip' }),
+    h('div', { class: 'pv-deck-grid' },
+      h('div', { class: 'pv-main-col' },
+        h('div', { class: 'pv-stage' }, frame, nav('prev', 'Previous slide', '\u2039', -1), nav('next', 'Next slide', '\u203A', 1)),
+        h('div', { class: 'pv-bar' },
+          h('span', { class: 'pv-count', id: 'pv-count' }),
+          h('span', { class: 'pv-title', id: 'pv-title' }),
+          h('button', { class: 'secondary sm', type: 'button', onclick: openSlideBox }, ico('expand'), 'Zoom Slide')),
+        h('div', { class: 'pv-editor', id: 'pv-editor', hidden: !S.pvEdit })),
+      h('div', { class: 'pv-sorter-col' },
+        h('div', { class: 'pv-sorter-head' }, h('b', {}, 'SLIDE SORTER'), h('span', {}, 'Click to jump')),
+        h('div', { class: 'pv-strip', id: 'pv-strip' }))),
     h('div', { class: 'pv-notes', id: 'pv-notes', hidden: true }),
     h('div', { class: 'pv-todo', id: 'pv-todo', hidden: true }),
     h('div', { class: 'pv-actions' },
@@ -1701,11 +1810,15 @@ function renderPreview() {
   if (has && strip.dataset.sig !== sig) {
     strip.dataset.sig = sig;
     strip.replaceChildren(...B.slides.map((sl, i) => h('button', { type: 'button', 'data-i': i, title: sl.title, onclick: () => gotoSlide(i) },
-      h('img', { alt: `Slide ${i + 1}`, src: slideUrl(i, 240) }), h('span', {}, String(i + 1)))));
+      h('img', { alt: `Slide ${i + 1}`, src: slideUrl(i, 320) }),
+      h('span', {}, String(i + 1)),
+      h('em', { class: 'pv-sl-title' }, sl.title || `Slide ${i + 1}`))));
   }
   $$('#pv-strip button').forEach(btn => {
     const on = +btn.dataset.i === B.cur; btn.classList.toggle('on', on);
-    if (on) { const r = btn.offsetLeft - strip.clientWidth / 2 + btn.clientWidth / 2; strip.scrollTo({ left: Math.max(0, r) }); }
+    if (on) {
+      btn.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    }
   });
   const nb = $('#pv-notes'), items = [...B.notes];
   if (B.status === 'error' && has) {
