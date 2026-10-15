@@ -985,7 +985,12 @@ def assign_cases(infos):
         for base, slot in MAIN_SLOTS:
             mains = [p for p in g.get(base, []) if p["role"] == base]
             if len(mains) > 1:
-                mains.sort(key=lambda p: (not p.get("user_set"), 0.0 if base == "bc" else -(p.get("max") or 0.0), p["id"]))
+                mains.sort(key=lambda p: (
+                    1 if (p.get("dup_mode") or "") in ("same_section", "same_zoom", "sep_section", "sep_zoom") else 0,
+                    not p.get("user_set"),
+                    0.0 if base == "bc" else -(p.get("max") or 0.0),
+                    p["id"],
+                ))
                 for p in mains[1:]:
                     p["auto_extra"] = True
                     c["demoted"].append((mains[0]["id"], p["id"], base))

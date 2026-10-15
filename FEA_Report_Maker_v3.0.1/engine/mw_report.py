@@ -734,7 +734,7 @@ def build_bc(prs, n, case, autocrop, layout="side"):
         buf, size = load_image(case["bc_image"], autocrop)
     else:                                           # no setup picture: text only (the caller decided that a slide is still useful)
         buf, size, layout = None, None, "side"
-    if layout == "stack":
+    if layout == "stack" and not case.get("bc_extra_same"):
         return _build_bc_stack(s, n, case, buf, size, items, notes)
     plan = _bc_side_plan(size, items, notes)
     bc_same = case.get("bc_extra_same") or []
