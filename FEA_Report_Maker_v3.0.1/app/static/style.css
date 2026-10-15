@@ -679,3 +679,180 @@ button.primary.big { padding: 14px 30px; font-size: 17px; }
   .recent-aside { position: static; max-height: none; }
   .recent-card { max-height: 460px; }
 }
+
+/* ───────── interactive PowerPoint-style slide & image editor in Report preview ───────── */
+#pv-edit-btn.active-edit {
+  background: var(--navy);
+  color: #fff;
+  border-color: var(--navy);
+}
+.pv-frame.editing { cursor: default; }
+.pv-canvas {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  user-select: none;
+  touch-action: none;
+}
+.pv-box {
+  position: absolute;
+  border: 2px dashed rgba(42, 111, 166, .75);
+  background: rgba(42, 111, 166, .06);
+  cursor: move;
+  box-sizing: border-box;
+  transition: background .1s, border-color .1s;
+}
+.pv-box:hover {
+  border-color: var(--blue);
+  background: rgba(42, 111, 166, .12);
+}
+.pv-box.sel {
+  border: 2px solid #0e639c;
+  background: rgba(14, 99, 156, .1);
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, .85), 0 4px 14px rgba(14, 99, 156, .28);
+  z-index: 6;
+}
+.pv-box.dragging {
+  background: rgba(14, 99, 156, .22);
+  opacity: .92;
+}
+.pv-box-tag {
+  position: absolute;
+  left: -2px;
+  top: -24px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 260px;
+  padding: 2px 7px;
+  border-radius: 5px 5px 5px 0;
+  background: var(--navy);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, .22);
+}
+.pv-box.sel .pv-box-tag { background: #0e639c; }
+.pv-box-del {
+  border: 0;
+  background: rgba(255, 255, 255, .2);
+  color: #fff;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  font-size: 10px;
+  line-height: 1;
+  padding: 0;
+  cursor: pointer;
+  display: inline-grid;
+  place-items: center;
+}
+.pv-box-del:hover { background: var(--bad); }
+.pv-h {
+  position: absolute;
+  width: 11px;
+  height: 11px;
+  background: #fff;
+  border: 2px solid #0e639c;
+  border-radius: 2px;
+  box-sizing: border-box;
+  z-index: 8;
+}
+.pv-h.nw { left: -6px; top: -6px; cursor: nwse-resize; }
+.pv-h.n  { left: calc(50% - 5.5px); top: -6px; cursor: ns-resize; }
+.pv-h.ne { right: -6px; top: -6px; cursor: nesw-resize; }
+.pv-h.e  { right: -6px; top: calc(50% - 5.5px); cursor: ew-resize; }
+.pv-h.se { right: -6px; bottom: -6px; cursor: nwse-resize; }
+.pv-h.s  { left: calc(50% - 5.5px); bottom: -6px; cursor: ns-resize; }
+.pv-h.sw { left: -6px; bottom: -6px; cursor: nesw-resize; }
+.pv-h.w  { left: -6px; top: calc(50% - 5.5px); cursor: ew-resize; }
+
+.pv-editor {
+  margin-top: 12px;
+  padding: 14px 16px;
+  border-radius: 10px;
+  background: #f5f9fd;
+  border: 1px solid #c7d9ec;
+  display: grid;
+  gap: 12px;
+}
+.pv-ed-row.top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding-bottom: 10px;
+  border-bottom: 1px solid #dde8f3;
+}
+.pv-ed-pills, .pv-ed-btns {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.pv-ed-lbl {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--navy);
+}
+.pv-pill {
+  padding: 5px 11px;
+  border-radius: 99px;
+  border: 1px solid var(--line2);
+  background: #fff;
+  color: var(--navy);
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.pv-pill.on {
+  background: var(--blue);
+  color: #fff;
+  border-color: var(--blue);
+}
+button.sm {
+  padding: 5px 11px;
+  font-size: 12.5px;
+  border-radius: 7px;
+}
+button.sm.danger:hover {
+  background: var(--bad-bg);
+  color: var(--bad);
+  border-color: var(--bad);
+}
+.pv-ed-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px 16px;
+}
+.pv-ed-field {
+  display: grid;
+  gap: 4px;
+}
+.pv-ed-field.span2 { grid-column: 1 / -1; }
+.pv-ed-inline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.pv-ed-inline input, .pv-ed-inline select {
+  flex: 1;
+  font-size: 13.5px;
+  padding: 6px 10px;
+}
+.pv-ed-empty, .pv-ed-restore {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 13px;
+  color: var(--grey);
+}
+@media (max-width: 760px) {
+  .pv-ed-grid { grid-template-columns: 1fr; }
+}
+

@@ -1527,10 +1527,253 @@ def build_report(cfg: dict, out: str | None = None) -> str:
     cp.title = short(cfg["cover"].get("title")) or "FEA report"
     cp.subject = short(f"FEA report {cfg['cover'].get('report_no', '')}")
     cp.author = short(cfg.get("author", "Mech Well")) or "Mech Well"
+    if cfg.get("slide_edits"):
+        apply_slide_edits(prs, cfg["slide_edits"])
+    cfg["_slide_images"] = extract_slide_images(prs)
     out = out or cfg.get("output", "FEA_Report.pptx")
     Path(out).parent.mkdir(parents=True, exist_ok=True)
     prs.save(out)
     return out
+
+
+def _shape_text(shp) -> str:
+    if shp is None or not getattr(shp, "has_text_frame", False):
+        return ""
+    return " ".join(p.text.strip() for p in shp.text_frame.paragraphs if p.text.strip()).strip()
+
+
+def _remove_shape(shp):
+    if shp is None:
+        return
+    try:
+        el = shp._element
+        if el.getparent() is not None:
+            el.getparent().remove(el)
+    except Exception:                                                    # noqa: BLE001
+        pass
+
+
+def _find_companions(slide, pic_sh, uid, n_pics_on_slide):
+    """Locate companion shapes (inset label/frame/arrow, heading, caption) belonging to `pic_sh` on `slide`."""
+    byname = {sh.name: sh for sh in slide.shapes if getattr(sh, "name", None)}
+    comp = {"label_bar": None, "label_txt": None, "frame": None, "zoom_area": None, "zoom_arrow": None,
+            "heading": None, "caption": None, "divider": byname.get("Divider"), "inset_k": None}
+    nm = getattr(pic_sh, "name", "") or ""
+    m_in = re.match(r"^Inset picture (\d+)$", nm)
+    m_bc = re.match(r"^Case \d+ boundary conditions (\d+)$", nm)
+    k = int(m_in.group(1)) if m_in else (int(m_bc.group(1)) - 1 if m_bc else None)
+    if k is not None:
+        comp["inset_k"] = k
+        comp["label_bar"] = byname.get(f"Inset label bar {k}")
+        comp["label_txt"] = byname.get(f"Inset label {k}")
+        comp["frame"] = byname.get(f"Inset frame {k}")
+        comp["zoom_area"] = byname.get(f"Zoom area {k}")
+        comp["zoom_arrow"] = byname.get(f"Zoom arrow {k}")
+    comp["heading"] = byname.get(f"{nm} heading")
+    comp["caption"] = byname.get(f"{uid} caption") or byname.get(f"{nm} caption")
+    if comp["caption"] is None and n_pics_on_slide == 1 and "Caption" in byname:
+        comp["caption"] = byname["Caption"]
+    return comp
+
+
+def _inventory_pictures(prs):
+    """Tag every picture across all slides with a deterministic uid ('s{s_idx}_p{p_idx}') and return a list of records."""
+    records = []
+    for s_idx, sl in enumerate(prs.slides):
+        pics = [sh for sh in sl.shapes if sh._element.tag.endswith("}pic")]
+        for p_idx, pic_sh in enumerate(pics):
+            uid = pic_sh._element.nvPicPr.cNvPr.get("title") or f"s{s_idx}_p{p_idx}"
+            pic_sh._element.nvPicPr.cNvPr.set("title", uid)
+            records.append((uid, s_idx, sl, pic_sh, len(pics)))
+    return records
+
+
+def apply_slide_edits(prs, slide_edits):
+    """Apply user interactive preview edits: move/resize images, add/edit captions, delete images, or move images across slides."""
+    if not isinstance(slide_edits, dict):
+        return
+    records = _inventory_pictures(prs)
+    new_slides_spec = slide_edits.get("new_slides") or []
+    new_map = {}
+    if isinstance(new_slides_spec, list):
+        for ns in new_slides_spec:
+            if not isinstance(ns, dict) or not ns.get("id"):
+                continue
+            title = str(ns.get("title") or "Additional View").strip() or "Additional View"
+            sl = content_slide(prs, title)
+            new_idx = len(prs.slides) - 1
+            after = ns.get("after_slide")
+            if isinstance(after, int) and 0 <= after < new_idx:
+                sldIdLst = prs.slides._sldIdLst
+                el = sldIdLst[-1]
+                sldIdLst.remove(el)
+                sldIdLst.insert(after + 1, el)
+                new_idx = after + 1
+                for k_id, v_idx in list(new_map.items()):
+                    if v_idx >= new_idx:
+                        new_map[k_id] = v_idx + 1
+            new_map[str(ns["id"])] = new_idx
+
+    items = slide_edits.get("items") or {}
+    if not isinstance(items, dict):
+        return
+
+    all_slides = list(prs.slides)
+    for uid, orig_s_idx, sl, pic_sh, n_pics in records:
+        ed = items.get(uid)
+        if not isinstance(ed, dict):
+            continue
+        comp = _find_companions(sl, pic_sh, uid, n_pics)
+
+        # 1. Deleted image
+        if ed.get("deleted"):
+            _remove_shape(pic_sh)
+            for key in ("label_bar", "label_txt", "frame", "zoom_area", "zoom_arrow", "heading", "caption", "divider"):
+                _remove_shape(comp.get(key))
+            continue
+
+        x = float(pic_sh.left) / E(1)
+        y = float(pic_sh.top) / E(1)
+        w = float(pic_sh.width) / E(1)
+        h = float(pic_sh.height) / E(1)
+        asp = (w / h) if h > 1e-3 else 1.5
+        old_label = _shape_text(comp["label_txt"])
+        old_cap = _shape_text(comp["caption"])
+        old_head = _shape_text(comp["heading"])
+        nm = getattr(pic_sh, "name", "") or "Picture"
+        alt = pic_sh._element.nvPicPr.cNvPr.get("descr") or nm
+
+        # 2. Target slide check (moving image from one slide/page to another)
+        tgt_raw = ed.get("target_slide")
+        dst_idx = None
+        if isinstance(tgt_raw, str) and tgt_raw in new_map:
+            dst_idx = new_map[tgt_raw]
+        elif isinstance(tgt_raw, int) and 0 <= tgt_raw < len(all_slides):
+            dst_idx = tgt_raw
+        cur_s_idx = next((idx for idx, s_cur in enumerate(all_slides) if s_cur == sl), orig_s_idx)
+
+        moved_slide = False
+        if dst_idx is not None and dst_idx != cur_s_idx:
+            moved_slide = True
+            blob = pic_sh.image.blob
+            dst_sl = all_slides[dst_idx]
+            dst_pics = [sh for sh in dst_sl.shapes if sh._element.tag.endswith("}pic")]
+            _remove_shape(pic_sh)
+            for key in ("label_bar", "label_txt", "frame", "zoom_area", "zoom_arrow", "heading", "caption", "divider"):
+                _remove_shape(comp.get(key))
+            if "x" not in ed or "y" not in ed or "w" not in ed or "h" not in ed:
+                if not dst_pics:
+                    w = min(680.0, 370.0 * asp)
+                    h = w / asp
+                    x = 480.0 - w / 2.0
+                    y = 105.0 + (380.0 - h) / 2.0
+                else:
+                    w = min(320.0, 220.0 * asp)
+                    h = w / asp
+                    x = max(40.0, 880.0 - w)
+                    y = min(490.0 - h, 115.0 + len(dst_pics) * 35.0)
+            sl = dst_sl
+            pic_sh = place_picture(sl, io.BytesIO(blob), (x, y, w, h), name=nm, alt=alt)
+            pic_sh._element.nvPicPr.cNvPr.set("title", uid)
+            comp = {"label_bar": None, "label_txt": None, "frame": None, "zoom_area": None, "zoom_arrow": None,
+                    "heading": None, "caption": None, "divider": None, "inset_k": comp["inset_k"]}
+            if old_label or comp["inset_k"] is not None:
+                k_new = comp["inset_k"] or (len(dst_pics) + 1)
+                comp["inset_k"] = k_new
+                _inset_label(sl, x, max(56.0, y - INSET_LABEL_H), w, old_label or nm, k_new)
+                comp["frame"] = add_frame(sl, x, y, w, h, INSET_BORDER, 1.5, f"Inset frame {k_new}")
+                byname_dst = {sh.name: sh for sh in sl.shapes if getattr(sh, "name", None)}
+                comp["label_bar"] = byname_dst.get(f"Inset label bar {k_new}")
+                comp["label_txt"] = byname_dst.get(f"Inset label {k_new}")
+
+        # 3. Position & Size (x, y, w, h)
+        has_geom = any(k in ed for k in ("x", "y", "w", "h"))
+        if has_geom:
+            w = max(40.0, min(920.0, float(ed.get("w", w))))
+            h = max(30.0, min(470.0, float(ed.get("h", h))))
+            x = max(6.0, min(954.0 - w, float(ed.get("x", x))))
+            y = max(54.0, min(534.0 - h, float(ed.get("y", y))))
+            pic_sh.left, pic_sh.top, pic_sh.width, pic_sh.height = E(x), E(y), E(w), E(h)
+            if comp["frame"] is not None:
+                comp["frame"].left, comp["frame"].top, comp["frame"].width, comp["frame"].height = E(x), E(y), E(w), E(h)
+            if comp["label_bar"] is not None:
+                ly = max(52.0, y - INSET_LABEL_H)
+                comp["label_bar"].left, comp["label_bar"].top, comp["label_bar"].width, comp["label_bar"].height = E(x), E(ly), E(w), E(INSET_LABEL_H)
+            if comp["label_txt"] is not None:
+                ly = max(52.0, y - INSET_LABEL_H)
+                comp["label_txt"].left, comp["label_txt"].top, comp["label_txt"].width, comp["label_txt"].height = E(x), E(ly), E(w), E(INSET_LABEL_H)
+            if comp["heading"] is not None:
+                hy = max(52.0, y - 25.0)
+                comp["heading"].left, comp["heading"].top, comp["heading"].width = E(x), E(hy), E(w)
+            _remove_shape(comp["zoom_area"])
+            _remove_shape(comp["zoom_arrow"])
+            _remove_shape(comp["divider"])
+
+        # 4. Inset / Heading Label edit
+        if "label" in ed:
+            lbl_str = str(ed.get("label") or "").strip()
+            if comp["label_txt"] is not None:
+                _remove_shape(comp["label_bar"])
+                _remove_shape(comp["label_txt"])
+                if lbl_str:
+                    k_id = comp["inset_k"] or 1
+                    _inset_label(sl, x, max(52.0, y - INSET_LABEL_H), w, lbl_str, k_id)
+            elif comp["heading"] is not None and lbl_str:
+                _remove_shape(comp["heading"])
+                hy = max(52.0, y - 25.0)
+                comp["heading"] = add_text(sl, x, hy, w, 24, [P([R(lbl_str, 16, True, TEAL_DK)], align="c")], wrap=False, name=f"{nm} heading")
+            elif lbl_str:
+                k_id = 9
+                _inset_label(sl, x, max(52.0, y - INSET_LABEL_H), w, lbl_str, k_id)
+
+        # 5. Caption edit (or preserve caption when moved/resized)
+        cap_changed = "caption" in ed
+        cap_str = str(ed.get("caption") if cap_changed else old_cap).strip()
+        if cap_changed or moved_slide or (has_geom and comp["caption"] is not None):
+            _remove_shape(comp["caption"])
+            if cap_str:
+                cw = max(w, 220.0)
+                cx = max(16.0, min(944.0 - cw, x + w / 2.0 - cw / 2.0))
+                cy = min(504.0, y + h + 4.0)
+                lines = balanced_lines(glue_units(cap_str), cw, 13, True)
+                runs = []
+                for idx_l, ln_ in enumerate(lines):
+                    runs += (["BR"] if idx_l else []) + [R(ln_, 13, True, BODY)]
+                add_text(sl, cx, cy, cw, 30.0, [P(runs, align="c")], name=f"{uid} caption")
+
+
+def extract_slide_images(prs):
+    """Return the list of editable picture descriptors for each slide in `prs`."""
+    out = []
+    for s_idx, sl in enumerate(prs.slides):
+        pics = [sh for sh in sl.shapes if sh._element.tag.endswith("}pic")]
+        slide_items = []
+        for p_idx, pic_sh in enumerate(pics):
+            uid = pic_sh._element.nvPicPr.cNvPr.get("title") or f"s{s_idx}_p{p_idx}"
+            comp = _find_companions(sl, pic_sh, uid, len(pics))
+            x = round(float(pic_sh.left) / E(1), 1)
+            y = round(float(pic_sh.top) / E(1), 1)
+            w = round(float(pic_sh.width) / E(1), 1)
+            h = round(float(pic_sh.height) / E(1), 1)
+            lbl = _shape_text(comp["label_txt"]) or _shape_text(comp["heading"])
+            cap = _shape_text(comp["caption"])
+            raw_name = getattr(pic_sh, "name", "") or f"Picture {p_idx + 1}"
+            display_name = lbl or raw_name
+            m_orig = re.match(r"^s(\d+)_p(\d+)$", uid)
+            orig_s = int(m_orig.group(1)) if m_orig else s_idx
+            slide_items.append({
+                "uid": uid,
+                "orig_slide": orig_s,
+                "slide": s_idx,
+                "x": x, "y": y, "w": w, "h": h,
+                "name": display_name,
+                "label": lbl,
+                "caption": cap,
+                "is_inset": bool(comp["inset_k"] is not None or comp["label_txt"] is not None),
+            })
+        out.append(slide_items)
+    return out
+
 
 
 if __name__ == "__main__":

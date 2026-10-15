@@ -1377,6 +1377,8 @@ def build_cfg(p: dict, infos: list, out_path: Path) -> dict:
         cfg["assumptions"] = assumptions
     if any(m.get("kind") in ("max_shear", "shear") for c in src_cases for m in (c.get("more") or [])):
         cfg["material"]["shear_formula"] = f"\u03c4all = {ctx['ratio']:g} \u00d7 Syt / FOS"
+    if isinstance(p.get("slide_edits"), dict) and p["slide_edits"]:
+        cfg["slide_edits"] = p["slide_edits"]
     return xml_safe(cfg)
 
 
@@ -1460,8 +1462,9 @@ def ensure_build(sid, p: dict) -> dict:
             raise UserError(f"The report could not be built ({type(err).__name__}: {err}). Please tell the person who maintains this program.")
         deck = pv.get_deck(out)
         notes = list(cfg.get("_notes") or []) + ([extra_note] if extra_note else [])
-        meta = {"key": key, "slides": [{"title": deck.title(i)} for i in range(deck.count())], "notes": notes,
-                "name": download_base(p), "built_at": time.time(), "pdf_method": None,
+        slide_imgs = cfg.get("_slide_images") or []
+        meta = {"key": key, "slides": [{"title": deck.title(i), "images": slide_imgs[i] if i < len(slide_imgs) else []} for i in range(deck.count())],
+                "notes": notes, "name": download_base(p), "built_at": time.time(), "pdf_method": None,
                 "not_drawn": sorted(set(deck.unsupported))}
         meta_f.write_text(json.dumps(meta), encoding="utf-8")
         builds = sess_dir(sid) / "builds"                                 # keep the last few builds only

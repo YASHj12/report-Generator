@@ -67,9 +67,10 @@ const S = {
   mat: { rows: [], gov: 0 }, defLimit: '', showUtil: true, geometry: [], meshes: [], meshStats: {}, assumed: {}, assumeCustom: '',
   layouts: { results: 'auto', geometry: 'auto', bc: 'auto', extras: 'auto' },
   cases: [], warnings: [], checks: [], suggest: null, layoutPlan: null, missing: 'skip', manual: false, build: freshBuild(), dlBusy: false, unordered: [],
+  slideEdits: { items: {}, new_slides: [] }, pvEdit: false, pvSelUid: null,
 };
 const STATE_KEYS = ['took', 'skipped', 'cover', 'short', 'fos', 'fosText', 'units', 'mat', 'defLimit', 'showUtil', 'geometry', 'meshes',
-                    'meshStats', 'assumed', 'assumeCustom', 'layouts', 'cases', 'warnings', 'missing', 'manual', 'unordered'];
+                    'meshStats', 'assumed', 'assumeCustom', 'layouts', 'cases', 'warnings', 'missing', 'manual', 'unordered', 'slideEdits'];
 
 const KEY = 'fea_maker_v2';
 function loadSaved() { try { return JSON.parse(localStorage.getItem(KEY)) || {}; } catch (e) { return {}; } }
@@ -405,6 +406,8 @@ function resume(r) {
   for (const k of STATE_KEYS) if (r.state[k] !== undefined) S[k] = r.state[k];
   S.cases.forEach(c => { c.more = c.more || []; c.views = c.views || []; });
   S.unordered = S.unordered || [];
+  S.slideEdits = (r.state && r.state.slideEdits) ? r.state.slideEdits : { items: {}, new_slides: [] };
+  S.pvEdit = false; S.pvSelUid = null;
   S.checks = []; S.suggest = null; S.layoutPlan = null; S.build = freshBuild(); S.missing = r.state.missing || S.missing;
   $('#resume').replaceChildren();
   show('review'); renderReview(); scheduleDerive(); setTimeout(() => buildNow().catch(() => {}), 60);
@@ -466,6 +469,8 @@ function startReview(r) {
   S.meshes = r.meshes.map(g => ({ id: g.id, heading: g.heading, caption: '', dup_mode: g.dup_mode || '' }));
   S.cases = r.cases.map(newCase).filter(caseHasFiles);
   S.unordered = r.unordered || [];
+  S.slideEdits = { items: {}, new_slides: [] };
+  S.pvEdit = false; S.pvSelUid = null;
   show('review');
   renderReview();
   scheduleDerive();
@@ -1303,6 +1308,7 @@ function buildPayload() {
       views: c.views.map(v => ({ id: v.id, view_kind: v.view_kind, label: v.slide_label || '', parent_id: v.parent_id })),
       texts: textsPayload(c) })),
     missing: S.missing,
+    slide_edits: S.slideEdits || { items: {}, new_slides: [] },
   };
 }
 
@@ -1313,11 +1319,37 @@ function slideWidth() {
   return Math.min(2000, Math.max(640, Math.ceil(css * (window.devicePixelRatio || 1) / 160) * 160));
 }
 
+function ensureSlideEdits() {
+  if (!S.slideEdits || typeof S.slideEdits !== 'object') S.slideEdits = { items: {}, new_slides: [] };
+  if (!S.slideEdits.items || typeof S.slideEdits.items !== 'object') S.slideEdits.items = {};
+  if (!Array.isArray(S.slideEdits.new_slides)) S.slideEdits.new_slides = [];
+  return S.slideEdits;
+}
+
+function getSlideEdit(uid) {
+  const se = ensureSlideEdits();
+  if (!se.items[uid]) se.items[uid] = {};
+  return se.items[uid];
+}
+
+function applyPvEditsNow() {
+  scheduleSave();
+  buildNow().catch(() => {});
+}
+
+function togglePvEdit() {
+  S.pvEdit = !S.pvEdit;
+  renderPreview();
+}
+
 function previewCard() {
   const nav = (cls, label, txt, delta) => h('button', { class: 'pv-nav ' + cls, type: 'button', id: 'pv-' + cls, 'aria-label': label,
     onclick: e => { e.stopPropagation(); gotoSlide(S.build.cur + delta); } }, txt);
-  const frame = h('div', { class: 'pv-frame loading', id: 'pv-frame', title: 'Click to see the slide full screen', onclick: openSlideBox },
-    h('img', { id: 'pv-img', alt: 'Preview of the slide' }), h('div', { class: 'pv-wait', id: 'pv-wait' }));
+  const frame = h('div', { class: 'pv-frame loading', id: 'pv-frame', title: 'Click to see the slide full screen',
+    onclick: e => { if (!S.pvEdit && !e.target.closest('.pv-canvas')) openSlideBox(); } },
+    h('img', { id: 'pv-img', alt: 'Preview of the slide' }),
+    h('div', { class: 'pv-canvas', id: 'pv-canvas', hidden: !S.pvEdit }),
+    h('div', { class: 'pv-wait', id: 'pv-wait' }));
   const missing = h('select', { id: 'pv-missing', 'aria-label': 'What to do when a picture is missing' },
     h('option', { value: 'skip', selected: S.missing === 'skip' }, 'Leave that slide out'),
     h('option', { value: 'frame', selected: S.missing === 'frame' }, 'Keep an empty frame to fill in PowerPoint'));
@@ -1325,13 +1357,17 @@ function previewCard() {
   return h('section', { class: 'card pv', id: 'pv-card' },
     h('div', { class: 'pv-head' }, h('h2', {}, 'Report preview'),
       h('span', { class: 'pv-status busy', id: 'pv-status' }, h('i'), h('span', { id: 'pv-status-text' }, 'Preparing ...')),
+      h('button', { class: 'secondary' + (S.pvEdit ? ' active-edit' : ''), type: 'button', id: 'pv-edit-btn', onclick: togglePvEdit },
+        S.pvEdit ? '\u2713 Done editing slide' : '\u270e Edit slide & images'),
       h('button', { class: 'secondary', type: 'button', id: 'pv-refresh', onclick: () => previewNow().catch(() => {}) }, ico('refresh'), 'Update preview'),
       h('button', { class: 'secondary', type: 'button', id: 'pv-full', onclick: openSlideBox }, ico('expand'), 'Full screen')),
-    h('p', { class: 'sub' }, 'This is your real report, drawn from the PowerPoint file that is built from what you see below. It is made once when I have read the pictures. After that it changes only when you press the ', h('b', {}, 'Preview'), ' button.'),
+    h('p', { class: 'sub' }, 'This is your real report, drawn from the PowerPoint file that is built from what you see below. Click ',
+      h('b', {}, '\u270e Edit slide & images'), ' to drag/rearrange images on the slide, resize them bigger or smaller, add/edit captions, move an image to another slide, or delete an image.'),
     h('div', { class: 'pv-outdated', id: 'pv-outdated', hidden: true }, h('span', {}, 'You changed something after this preview was made, so it still shows the previous version.'),
       h('button', { class: 'primary', type: 'button', onclick: () => previewNow().catch(() => {}) }, 'Update preview')),
     h('div', { class: 'pv-stage' }, frame, nav('prev', 'Previous slide', '\u2039', -1), nav('next', 'Next slide', '\u203A', 1)),
     h('div', { class: 'pv-bar' }, h('span', { class: 'pv-count', id: 'pv-count' }), h('span', { class: 'pv-title', id: 'pv-title' })),
+    h('div', { class: 'pv-editor', id: 'pv-editor', hidden: !S.pvEdit }),
     h('div', { class: 'pv-strip', id: 'pv-strip' }),
     h('div', { class: 'pv-notes', id: 'pv-notes', hidden: true }),
     h('div', { class: 'pv-todo', id: 'pv-todo', hidden: true }),
@@ -1341,6 +1377,293 @@ function previewCard() {
       h('button', { class: 'secondary save-action', type: 'button', onclick: () => saveCurrentWork(true) }, ico('save'), 'Save File'),
       h('button', { class: 'secondary', type: 'button', 'data-dl': 'pdf', onclick: () => downloadReport('pdf') }, ico('download'), 'Download PDF'),
       h('button', { class: 'primary', type: 'button', 'data-dl': 'pptx', onclick: () => downloadReport('pptx') }, ico('download'), 'Download PowerPoint')));
+}
+
+function scalePvItem(im, factor) {
+  if (!im) return;
+  const cx = im.x + im.w / 2, cy = im.y + im.h / 2;
+  const nw = Math.max(45, Math.min(910, Math.round(im.w * factor * 10) / 10));
+  const nh = Math.max(35, Math.min(460, Math.round(im.h * factor * 10) / 10));
+  const nx = Math.max(8, Math.min(952 - nw, Math.round((cx - nw / 2) * 10) / 10));
+  const ny = Math.max(56, Math.min(532 - nh, Math.round((cy - nh / 2) * 10) / 10));
+  Object.assign(getSlideEdit(im.uid), { x: nx, y: ny, w: nw, h: nh });
+  applyPvEditsNow();
+}
+
+function centerPvItem(im) {
+  if (!im) return;
+  const nx = Math.round((480 - im.w / 2) * 10) / 10;
+  const ny = Math.round((295 - im.h / 2) * 10) / 10;
+  Object.assign(getSlideEdit(im.uid), { x: nx, y: ny, w: im.w, h: im.h });
+  applyPvEditsNow();
+}
+
+function deletePvItem(uid) {
+  if (!uid) return;
+  const ed = getSlideEdit(uid);
+  ed.deleted = true;
+  if (S.pvSelUid === uid) S.pvSelUid = null;
+  toast('Image removed from slide. You can restore it anytime in Edit slide & images.', 'info', 4500);
+  applyPvEditsNow();
+}
+
+function restorePvItem(uid) {
+  const se = ensureSlideEdits();
+  if (se.items[uid]) delete se.items[uid].deleted;
+  S.pvSelUid = uid;
+  applyPvEditsNow();
+}
+
+function resetPvItem(uid) {
+  const se = ensureSlideEdits();
+  delete se.items[uid];
+  applyPvEditsNow();
+}
+
+function resetAllPvEdits() {
+  S.slideEdits = { items: {}, new_slides: [] };
+  toast('Reset all manual slide & image edits.', 'info', 3500);
+  applyPvEditsNow();
+}
+
+function movePvItemToSlide(im, targetVal, customTitle) {
+  if (!im || targetVal === '' || targetVal === null || targetVal === undefined) return;
+  const se = ensureSlideEdits();
+  const ed = getSlideEdit(im.uid);
+  delete ed.x; delete ed.y; delete ed.w; delete ed.h;
+  if (targetVal === 'new') {
+    const newId = 'new_' + Date.now();
+    const defaultTitle = (customTitle || '').trim() || `${(S.build.slides[S.build.cur] && S.build.slides[S.build.cur].title) || 'Slide'} \u2013 ${im.name || 'Detail view'}`;
+    se.new_slides.push({ id: newId, after_slide: S.build.cur, title: defaultTitle });
+    ed.target_slide = newId;
+    const destSlideIdx = S.build.cur + 1;
+    scheduleSave();
+    buildNow().then(() => { gotoSlide(destSlideIdx); }).catch(() => {});
+  } else {
+    const dstIdx = parseInt(targetVal, 10);
+    if (isNaN(dstIdx)) return;
+    ed.target_slide = dstIdx;
+    scheduleSave();
+    buildNow().then(() => { gotoSlide(dstIdx); }).catch(() => {});
+  }
+}
+
+function startPvDrag(e, im, boxEl, mode) {
+  if (e.button !== 0) return;
+  e.preventDefault(); e.stopPropagation();
+  if (S.pvSelUid !== im.uid) {
+    S.pvSelUid = im.uid;
+    renderPvEditor();
+  }
+  const canvas = $('#pv-canvas');
+  if (!canvas) return;
+  const rect = canvas.getBoundingClientRect();
+  if (!rect.width || !rect.height) return;
+  const startX = e.clientX, startY = e.clientY;
+  const orig = { x: im.x, y: im.y, w: im.w, h: im.h };
+  const asp = orig.w / Math.max(1, orig.h);
+  let cur = Object.assign({}, orig);
+  let moved = false;
+
+  const targetBox = canvas.querySelector(`[data-uid="${im.uid}"]`) || boxEl;
+  if (targetBox) targetBox.classList.add('dragging');
+
+  const onMove = ev => {
+    const dxPt = ((ev.clientX - startX) / rect.width) * 960.0;
+    const dyPt = ((ev.clientY - startY) / rect.height) * 540.0;
+    if (Math.abs(dxPt) > 0.8 || Math.abs(dyPt) > 0.8) moved = true;
+    if (mode === 'move') {
+      cur.x = Math.max(6, Math.min(954 - orig.w, orig.x + dxPt));
+      cur.y = Math.max(54, Math.min(534 - orig.h, orig.y + dyPt));
+    } else {
+      let nx = orig.x, ny = orig.y, nw = orig.w, nh = orig.h;
+      if (mode.includes('e')) nw = Math.max(45, Math.min(954 - orig.x, orig.w + dxPt));
+      if (mode.includes('s')) nh = Math.max(35, Math.min(534 - orig.y, orig.h + dyPt));
+      if (mode.includes('w')) {
+        const maxDx = orig.w - 45;
+        const d = Math.max(-orig.x + 6, Math.min(maxDx, dxPt));
+        nx = orig.x + d; nw = orig.w - d;
+      }
+      if (mode.includes('n')) {
+        const maxDy = orig.h - 35;
+        const d = Math.max(-orig.y + 54, Math.min(maxDy, dyPt));
+        ny = orig.y + d; nh = orig.h - d;
+      }
+      if (mode.length === 2 && !ev.shiftKey) {
+        nh = Math.max(35, Math.min(470, nw / asp));
+        if (mode.includes('n')) ny = orig.y + orig.h - nh;
+      }
+      cur = { x: nx, y: ny, w: nw, h: nh };
+    }
+    if (targetBox) {
+      targetBox.style.left = `${(cur.x / 960) * 100}%`;
+      targetBox.style.top = `${(cur.y / 540) * 100}%`;
+      targetBox.style.width = `${(cur.w / 960) * 100}%`;
+      targetBox.style.height = `${(cur.h / 540) * 100}%`;
+    }
+  };
+
+  const onUp = () => {
+    window.removeEventListener('pointermove', onMove);
+    window.removeEventListener('pointerup', onUp);
+    if (targetBox) targetBox.classList.remove('dragging');
+    if (moved) {
+      Object.assign(getSlideEdit(im.uid), {
+        x: Math.round(cur.x * 10) / 10,
+        y: Math.round(cur.y * 10) / 10,
+        w: Math.round(cur.w * 10) / 10,
+        h: Math.round(cur.h * 10) / 10,
+      });
+      applyPvEditsNow();
+    }
+  };
+
+  window.addEventListener('pointermove', onMove);
+  window.addEventListener('pointerup', onUp);
+}
+
+function renderPvEditor() {
+  const B = S.build, has = !!(B.key && B.slides.length);
+  const editBtn = $('#pv-edit-btn');
+  if (editBtn) {
+    editBtn.classList.toggle('active-edit', !!S.pvEdit);
+    editBtn.textContent = S.pvEdit ? '\u2713 Done editing slide' : '\u270e Edit slide & images';
+  }
+  const canvas = $('#pv-canvas'), editor = $('#pv-editor'), frame = $('#pv-frame');
+  if (!canvas || !editor) return;
+  canvas.hidden = !S.pvEdit || !has;
+  editor.hidden = !S.pvEdit || !has;
+  if (frame) frame.classList.toggle('editing', !!(S.pvEdit && has));
+  if (!S.pvEdit || !has) return;
+
+  const sl = B.slides[B.cur] || {};
+  const imgs = sl.images || [];
+  if (!imgs.some(x => x.uid === S.pvSelUid)) {
+    S.pvSelUid = imgs.length ? imgs[0].uid : null;
+  }
+  const sel = imgs.find(x => x.uid === S.pvSelUid) || null;
+
+  // 1. Render interactive boxes on #pv-canvas
+  const boxes = imgs.map((im, idx) => {
+    const isSel = im.uid === S.pvSelUid;
+    const handles = isSel ? ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'].map(dir => {
+      const hEl = h('span', { class: 'pv-h ' + dir, title: 'Drag to resize image' });
+      hEl.addEventListener('pointerdown', e => startPvDrag(e, im, null, dir));
+      return hEl;
+    }) : [];
+    const delBtn = h('button', { class: 'pv-box-del', type: 'button', title: 'Delete this image from slide',
+      onclick: e => { e.stopPropagation(); deletePvItem(im.uid); } }, '\u2715');
+    delBtn.addEventListener('pointerdown', e => e.stopPropagation());
+    const box = h('div', {
+      class: 'pv-box' + (isSel ? ' sel' : ''),
+      'data-uid': im.uid,
+      style: `left:${(im.x / 960) * 100}%;top:${(im.y / 540) * 100}%;width:${(im.w / 960) * 100}%;height:${(im.h / 540) * 100}%`,
+      title: 'Drag to move image on slide \u00b7 Drag corners/edges to resize',
+    },
+      h('div', { class: 'pv-box-tag' }, h('span', {}, `${idx + 1}. ${im.name || 'Image'}`), delBtn),
+      ...handles
+    );
+    box.addEventListener('pointerdown', e => startPvDrag(e, im, box, 'move'));
+    return box;
+  });
+  canvas.replaceChildren(...boxes);
+
+  // 2. Render PowerPoint-style toolbar in #pv-editor
+  const se = ensureSlideEdits();
+  const deletedUids = Object.entries(se.items).filter(([, v]) => v && v.deleted).map(([k]) => k);
+  const hasAnyEdits = Object.keys(se.items).length > 0 || (se.new_slides && se.new_slides.length > 0);
+
+  if (!imgs.length) {
+    editor.replaceChildren(
+      h('div', { class: 'pv-ed-empty' },
+        h('span', {}, 'No movable images on this slide. Navigate to a slide with pictures (Geometry, Mesh, Setup, Results, or Extra views) to move, resize, caption, or rearrange images.'),
+        deletedUids.length ? h('div', { class: 'pv-ed-restore' },
+          h('b', {}, 'Deleted images: '),
+          ...deletedUids.map(u => h('button', { class: 'secondary sm', type: 'button', onclick: () => restorePvItem(u) }, `Restore ${u}`))) : null,
+        hasAnyEdits ? h('button', { class: 'secondary sm', type: 'button', onclick: resetAllPvEdits }, '\u21ba Reset all slide edits') : null
+      )
+    );
+    return;
+  }
+
+  const pills = imgs.map((im, idx) => h('button', {
+    type: 'button',
+    class: 'pv-pill' + (im.uid === S.pvSelUid ? ' on' : ''),
+    onclick: () => { S.pvSelUid = im.uid; renderPvEditor(); },
+  }, `${idx + 1}. ${im.name || 'Picture'}`));
+
+  const capInput = h('input', {
+    type: 'text',
+    value: sel ? (sel.caption || '') : '',
+    placeholder: 'Add or edit caption below this image on the slide ...',
+    'aria-label': 'Caption below selected image',
+  });
+  const applyCap = () => {
+    if (!sel) return;
+    getSlideEdit(sel.uid).caption = capInput.value.trim();
+    applyPvEditsNow();
+  };
+  capInput.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); applyCap(); } });
+
+  const lblInput = h('input', {
+    type: 'text',
+    value: sel ? (sel.label || '') : '',
+    placeholder: 'Optional heading/label above image (e.g. Cut section, Zoomed view)',
+    'aria-label': 'Heading or label above selected image',
+  });
+  const applyLbl = () => {
+    if (!sel) return;
+    getSlideEdit(sel.uid).label = lblInput.value.trim();
+    applyPvEditsNow();
+  };
+  lblInput.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); applyLbl(); } });
+
+  const moveSel = h('select', { class: 'sub-sel', 'aria-label': 'Move selected image to another slide' },
+    h('option', { value: '' }, 'Choose target slide / page ...'),
+    ...B.slides.map((sItem, sIdx) => h('option', { value: String(sIdx), disabled: sIdx === B.cur },
+      `Slide ${sIdx + 1}: ${sItem.title || 'Untitled'}${sIdx === B.cur ? ' (current)' : ''}`)),
+    h('option', { value: 'new' }, '+ New slide right after this page'));
+  const newSlideTitle = h('input', {
+    type: 'text',
+    class: 'pv-newtitle',
+    hidden: true,
+    placeholder: 'Title for the new slide (optional)',
+  });
+  moveSel.addEventListener('change', () => { newSlideTitle.hidden = moveSel.value !== 'new'; });
+
+  editor.replaceChildren(
+    h('div', { class: 'pv-ed-row top' },
+      h('div', { class: 'pv-ed-pills' }, h('span', { class: 'pv-ed-lbl' }, 'Select image on slide:'), ...pills),
+      h('div', { class: 'pv-ed-btns' },
+        h('button', { class: 'secondary sm', type: 'button', title: 'Make selected image larger', onclick: () => scalePvItem(sel, 1.14) }, '\uff0b Bigger'),
+        h('button', { class: 'secondary sm', type: 'button', title: 'Make selected image smaller', onclick: () => scalePvItem(sel, 0.88) }, '\uff0d Smaller'),
+        h('button', { class: 'secondary sm', type: 'button', title: 'Center selected image on slide', onclick: () => centerPvItem(sel) }, '\u21d4 Center'),
+        h('button', { class: 'secondary sm danger', type: 'button', title: 'Delete selected image from this slide', onclick: () => sel && deletePvItem(sel.uid) }, '\ud83d\uddd1 Delete image'),
+        sel && se.items[sel.uid] ? h('button', { class: 'secondary sm', type: 'button', onclick: () => resetPvItem(sel.uid) }, '\u21ba Reset image') : null,
+        hasAnyEdits ? h('button', { class: 'secondary sm', type: 'button', onclick: resetAllPvEdits }, '\u21ba Reset all edits') : null
+      )
+    ),
+    h('div', { class: 'pv-ed-grid' },
+      h('div', { class: 'pv-ed-field' },
+        h('span', { class: 'pv-ed-lbl' }, 'Caption under image on slide:'),
+        h('div', { class: 'pv-ed-inline' }, capInput,
+          h('button', { class: 'secondary sm', type: 'button', onclick: applyCap }, 'Apply caption'))
+      ),
+      h('div', { class: 'pv-ed-field' },
+        h('span', { class: 'pv-ed-lbl' }, 'Label above image (e.g. Cut section / Zoomed view):'),
+        h('div', { class: 'pv-ed-inline' }, lblInput,
+          h('button', { class: 'secondary sm', type: 'button', onclick: applyLbl }, 'Apply label'))
+      ),
+      h('div', { class: 'pv-ed-field span2' },
+        h('span', { class: 'pv-ed-lbl' }, 'Move this image (zoomed, cut-section, or plot) to another slide / page:'),
+        h('div', { class: 'pv-ed-inline' }, moveSel, newSlideTitle,
+          h('button', { class: 'primary sm', type: 'button', onclick: () => movePvItemToSlide(sel, moveSel.value, newSlideTitle.value) }, 'Move to page \u2794'))
+      )
+    ),
+    deletedUids.length ? h('div', { class: 'pv-ed-restore' },
+      h('b', {}, 'Deleted from slides: '),
+      ...deletedUids.map(u => h('button', { class: 'secondary sm', type: 'button', onclick: () => restorePvItem(u) }, `Restore (${u})`))) : null
+  );
 }
 
 function renderPreview() {
@@ -1394,6 +1717,7 @@ function renderPreview() {
     nb.replaceChildren(h('b', {}, 'Left out or simplified because something is missing:'), h('ul', {}, items.map(t => h('li', {}, t))));
   }
   renderTodo();
+  renderPvEditor();
   if (!$('#slidebox').hidden) renderSlideBox();
 }
 
